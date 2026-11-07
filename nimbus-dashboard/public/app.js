@@ -324,6 +324,10 @@
               <dt>Outdoors</dt><dd data-f="sky-outdoor"></dd>
               <dt class="wide" data-f="event-label">Booked</dt><dd class="wide" data-f="event"></dd>
             </dl>
+            <div class="button-row rain-demo">
+              <button class="btn btn-quiet" type="button" id="rain-toggle" aria-pressed="false">Pretend rain is coming</button>
+            </div>
+            <p class="form-error" id="rain-error" role="alert" hidden></p>
           </section>
 
           <section class="panel" aria-labelledby="dev-title">
@@ -351,6 +355,8 @@
       }),
     );
     setupOverrideForm(room);
+    $('#rain-toggle').addEventListener('click', toggleRain);
+    updateRainToggle();
     updateRoomLive(room);
     buildCharts();
     loadHistory();
@@ -384,7 +390,8 @@
     set('window', valueHtml(win.value, win.unit));
     set('mode', esc(room.mode === 'manual' ? 'Manual control' : 'Automatic'));
 
-    set('rain', isNum(room.rainChance) ? esc(`${room.rainChance}%`) : '–');
+    const forced = isNum(state.status?.forcedRain);
+    set('rain', isNum(room.rainChance) ? esc(`${room.rainChance}%${forced ? ' (demo setting)' : ''}`) : '–');
     set('sky-trend', esc(isNum(room.pressure) ? trendText(room.pressureTrend) : '–'));
     set('sky-outdoor', isNum(room.outdoorTemp) ? esc(`${fmtNum(toTemp(room.outdoorTemp), 0)}${unitT}`) : '–');
     const ev = room.nextEvent;
@@ -488,6 +495,38 @@
     held.hidden = false;
     clear.hidden = false;
     $('#ov-hold').textContent = 'Update held settings';
+  }
+
+  // ---------- demo setting: pretend rain is coming
+
+  function updateRainToggle() {
+    const btn = $('#rain-toggle');
+    if (!btn) return;
+    const forced = isNum(state.status?.forcedRain);
+    btn.textContent = forced ? 'Stop pretending it will rain' : 'Pretend rain is coming';
+    btn.setAttribute('aria-pressed', String(forced));
+  }
+
+  async function toggleRain() {
+    const btn = $('#rain-toggle');
+    const err = $('#rain-error');
+    const forced = isNum(state.status?.forcedRain);
+    err.hidden = true;
+    btn.disabled = true;
+    try {
+      state.status = await getJson('/api/weather/rain', {
+        method: forced ? 'DELETE' : 'POST',
+        headers: forced ? undefined : { 'Content-Type': 'application/json' },
+        body: forced ? undefined : JSON.stringify({ chance: 80 }),
+      });
+      renderFooter();
+      updateRainToggle();
+    } catch (e) {
+      err.textContent = `${e.message} Nothing was changed.`;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function snap(v, step) {
@@ -788,7 +827,8 @@
     footer.innerHTML = `
       <span><strong>Data</strong> ${esc(store)}</span>
       <span><strong>Devices</strong> ${esc(mqtt)}</span>
-      ${simulated.length ? `<span><strong>Simulated rooms</strong> ${esc(simulated.join(', '))}</span>` : ''}`;
+      ${simulated.length ? `<span><strong>Simulated rooms</strong> ${esc(simulated.join(', '))}</span>` : ''}
+      ${isNum(s.forcedRain) ? `<span><strong>Demo setting</strong> rain chance forced to ${esc(s.forcedRain)}%</span>` : ''}`;
   }
 
   function setLive(mode) {
@@ -862,6 +902,7 @@
     socket.on('status', (s) => {
       state.status = s;
       renderFooter();
+      updateRainToggle();
     });
 
     // Relative times, staleness and countdowns

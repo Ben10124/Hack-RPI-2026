@@ -1,4 +1,4 @@
-// Pretends to be the UNO Q, the camera counter and the Pi 4 controller by
+// Pretends to be the UNO Q, the camera counter and a controller by
 // publishing simulated rooms over MQTT. Use it to test the full MQTT path
 // before the hardware is ready, or to fill extra rooms during a demo.
 //

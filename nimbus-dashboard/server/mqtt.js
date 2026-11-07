@@ -3,18 +3,23 @@
 //
 // Subscribes:  <prefix><room>/sensors     from the UNO Q
 //              <prefix><room>/occupancy   from the Pi 4 camera counter
-//              <prefix><room>/cmd         from the Pi 4 controller (fan, window, reason)
-//              <prefix><room>/context     from the Pi 4 controller (calendar, weather)
-// Publishes:   <prefix><room>/override    retained, for the Pi 4 controller
+//              <prefix><room>/cmd         from an external controller (fan, window, reason)
+//              <prefix><room>/context     from an external controller (calendar, weather)
+// Publishes:   <prefix><room>/override    retained, for any external controller
+//              <prefix><room>/cmd         and <room>/heartbeat for rooms this
+//                                          server controls (via publish())
+//
+// For rooms this server controls, cmd and context messages from other
+// publishers are ignored so two controllers never fight over one room.
 
 const mqtt = require('mqtt');
 
 const KINDS = ['sensors', 'occupancy', 'cmd', 'context'];
 
-function startMqtt({ url, prefix, hub, onStatus }) {
+function startMqtt({ url, prefix, hub, onStatus, isControlled = () => false }) {
   if (!url) {
     console.log('[mqtt] MQTT_URL not set, not listening for devices');
-    return { status: () => 'off' };
+    return { status: () => 'off', publish: () => {} };
   }
 
   let status = 'connecting';
@@ -55,6 +60,7 @@ function startMqtt({ url, prefix, hub, onStatus }) {
     }
     // A bare number on the occupancy topic is accepted as the people count.
     if (kind === 'occupancy' && typeof payload === 'number') payload = { people: payload };
+    if ((kind === 'cmd' || kind === 'context') && isControlled(roomId)) return;
     const ok = hub.ingest(roomId, kind, payload);
     if (!ok && !warned.has(topic)) {
       warned.add(topic);
@@ -69,7 +75,14 @@ function startMqtt({ url, prefix, hub, onStatus }) {
     client.publish(`${prefix}${roomId}/override`, JSON.stringify(message), { qos: 1, retain: true });
   });
 
-  return { status: () => status, client };
+  // Topic without the prefix, e.g. "room1/cmd". Dropped while disconnected
+  // (the next decision a few seconds later replaces it anyway).
+  const publish = (topic, payload) => {
+    if (!client.connected) return;
+    client.publish(`${prefix}${topic}`, JSON.stringify(payload), { qos: 0 });
+  };
+
+  return { status: () => status, publish, client };
 }
 
 module.exports = { startMqtt };

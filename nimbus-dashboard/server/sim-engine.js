@@ -1,26 +1,26 @@
 // Simulated rooms: people arriving for booked events, CO₂ building up,
 // weather changing, and a controller reacting with the same rules the real
-// Pi 4 controller will use. Lets you build and demo the dashboard before the
+// room's controller uses (server/rules.js). Lets you build and demo the dashboard before the
 // hardware works.
 //
 // `send(roomId, kind, payload)` receives each message, where kind is one of
 // sensors | occupancy | cmd | context, exactly like the MQTT topics.
 
+const rules = require('./rules');
+
 const OUTDOOR_CO2 = 420;
 const CO2_PER_PERSON_CFM = 0.011; // CO₂ exhaled by a seated adult, cubic feet per minute
-const CFM_PER_PERSON = 10; // ASHRAE 62.1 classroom outdoor-air rate per person
-const CFM_PER_SQFT = 0.12; // ASHRAE 62.1 classroom outdoor-air rate per floor area
 const CEILING_FT = 9;
 const INFILTRATION_ACH = 0.3;
 
 const EVENT_TITLES = ['Physics lecture', 'CS study group', 'Calculus recitation', 'Club meeting', 'Lab section', 'Review session'];
 
 class SimEngine {
-  constructor({ rooms, airQuality, speed = 6, send }) {
+  constructor({ rooms, airQuality, speed = 6, send, forcedRain = () => null }) {
     this.send = send;
     this.speed = speed;
-    this.good = airQuality?.good ?? 800;
-    this.poor = airQuality?.poor ?? 1200;
+    this.airQuality = airQuality;
+    this.forcedRain = forcedRain; // demo setting: a rain chance that replaces the simulated one
     this.weather = { pressure: 1013.2, drift: 0, rainChance: 15, outdoorTemp: 8 };
     this.rooms = rooms.map((cfg, i) => this.makeRoom(cfg, i));
     this.tickCount = 0;
@@ -35,7 +35,7 @@ class SimEngine {
       area,
       capacity,
       volume: area * CEILING_FT,
-      maxCfm: CFM_PER_PERSON * capacity + CFM_PER_SQFT * area,
+      maxCfm: rules.maxCfm(capacity, area),
       people: index === 1 ? Math.round(capacity * 0.5) : 0,
       co2: index === 1 ? 980 : 520 + index * 40,
       temp: 21 + index * 0.4,
@@ -112,63 +112,22 @@ class SimEngine {
   }
 
   decide(room, now) {
-    const current = room.events.find((e) => e.start <= now && e.end > now);
-    const next = room.events.find((e) => e.start > now);
-    const minsToNext = next ? (next.start - now) / 60000 : Infinity;
-    const raining = this.weather.rainChance >= 50;
-    const falling = this.weather.drift < 0;
-
-    if (room.override) {
-      const fan = room.override.fan ?? room.fan;
-      const window = room.override.window ?? room.window;
-      return {
-        fan,
-        window,
-        reason: `Manual override from the dashboard. Fan held at ${fan}%, window ${window === 0 ? 'closed' : `${window}% open`}.`,
-        mode: 'manual',
-      };
-    }
-
-    // ASHRAE-style demand: airflow for the people here plus the floor area.
-    let needed = CFM_PER_PERSON * room.people + CFM_PER_SQFT * room.area;
-    let preVent = false;
-    if (next && minsToNext <= 10 && next.booked > room.people) {
-      const ahead = 0.6 * (CFM_PER_PERSON * next.booked + CFM_PER_SQFT * room.area);
-      if (ahead > needed) {
-        needed = ahead;
-        preVent = true;
-      }
-    }
-    // Feedback from the air sensor: push harder when air is getting worse.
-    if (room.co2 > this.good) needed *= 1 + Math.min(1, (room.co2 - this.good) / (this.poor - this.good)) * 0.6;
-
-    let window = 0;
-    if (!raining && room.people > 0 && room.co2 > this.good - 150) {
-      window = room.co2 > this.poor ? 70 : 40;
-    }
-    const windowCfm = (window / 100) * 0.5 * room.maxCfm;
-    let fan = Math.round(((needed - windowCfm) / room.maxCfm) * 100);
-    fan = room.people === 0 && !preVent ? clamp(fan, 0, 15) : clamp(fan, 20, 100);
-
-    // Explain the decision in one sentence a person can read from across the room.
-    const aqLabel = room.co2 >= this.poor ? 'stale' : room.co2 >= this.good ? 'getting stuffy' : 'fresh';
-    const co2 = Math.round(room.co2);
-    const parts = [];
-    if (preVent) {
-      parts.push(`${next.title} starts in ${Math.max(1, Math.round(minsToNext))} min with ${next.booked} booked, so the room is being aired out ahead of time.`);
-    } else if (current && room.people < current.booked * 0.5 && current.booked >= 6) {
-      parts.push(`${current.title} was booked for ${current.booked} but only ${room.people} came, so ventilation is scaled down to save energy.`);
-    } else if (room.people === 0) {
-      parts.push(`Room is empty and the air is ${aqLabel} at ${co2} ppm.`);
-    } else {
-      parts.push(`${room.people} ${room.people === 1 ? 'person' : 'people'} here and the air is ${aqLabel} at ${co2} ppm.`);
-    }
-    if (window > 0) parts.push(`Fan at ${fan}%, window open ${window}% while it's dry outside.`);
-    else if (raining) parts.push(`Fan at ${fan}%, window kept closed because rain is likely (${Math.round(this.weather.rainChance)}%).`);
-    else if (falling && room.people > 0) parts.push(`Fan at ${fan}%, window closed as pressure is falling.`);
-    else parts.push(`Fan at ${fan}%, window closed.`);
-
-    return { fan, window, reason: parts.join(' '), mode: 'auto' };
+    const forced = this.forcedRain();
+    return rules.decide(
+      {
+        people: room.people,
+        aq: rules.fromPpm(room.co2, this.airQuality),
+        areaSqft: room.area,
+        capacity: room.capacity,
+        rainChance: forced ?? this.weather.rainChance,
+        pressureTrend: this.weather.drift,
+        current: room.events.find((e) => e.start <= now && e.end > now) || null,
+        next: room.events.find((e) => e.start > now) || null,
+        override: room.override,
+        now,
+      },
+      this.airQuality,
+    );
   }
 
   stepAir(room, dtMin) {
@@ -193,7 +152,7 @@ class SimEngine {
     this.send(room.id, 'sensors', {
       temp: round(room.temp, 1),
       pressure: round(this.weather.pressure + (Math.random() - 0.5) * 0.04, 2),
-      aq: Math.round(room.co2),
+      aq: Math.round(rules.fromPpm(room.co2, this.airQuality)),
       rpm,
       window: decision.window,
     });
@@ -202,7 +161,7 @@ class SimEngine {
       const shown = current && current.end - now > 60000 ? current : next;
       this.send(room.id, 'context', {
         booked: current ? current.booked : 0,
-        rainChance: Math.round(this.weather.rainChance),
+        rainChance: Math.round(this.forcedRain() ?? this.weather.rainChance),
         outdoorTemp: round(this.weather.outdoorTemp, 1),
         nextEvent: shown ? { title: shown.title, start: new Date(shown.start).toISOString(), people: shown.booked } : null,
       });

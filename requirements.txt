@@ -1,0 +1,11 @@
+# People Counter — Pi 4 dependencies
+# Install on the Raspberry Pi with:
+#   pip install -r requirements.txt
+#
+# Note: picamera2 is pre-installed on Raspberry Pi OS (Bookworm+).
+#       If missing, install with: sudo apt install python3-picamera2
+
+ultralytics>=8.0.0       # YOLOv8 — downloads yolov8n.pt on first run
+opencv-python-headless    # headless build (no GTK needed on Pi)
+paho-mqtt>=1.6,<2.0       # MQTT client
+numpy

@@ -1,287 +1,325 @@
 #!/usr/bin/env python3
 """
-People Counter for Occupancy-Aware Ventilation System
-=====================================================
-Runs on Raspberry Pi 4. Captures frames from the CSI camera using Picamera2,
-detects people with YOLOv8-nano, and publishes the count over MQTT.
+people_counter.py - counts people with a webcam and publishes the count over MQTT.
 
-MQTT topic:  room1/occupancy   →  {"people": 7}
+Privacy: frames live only in memory and are never written to disk or sent anywhere.
+Only the integer count leaves this script.
 
-No frames are saved or transmitted — only the integer count leaves the device.
+Install (inside a venv on the Pi 4, 64-bit Raspberry Pi OS):
+    pip install ultralytics opencv-python-headless "paho-mqtt>=1.6"
+(On a laptop where you want --show, use opencv-python instead of the headless build.)
 
-Dependencies (install on the Pi):
-    pip install picamera2 ultralytics opencv-python-headless paho-mqtt
+Run:
+    python people_counter.py                     # publishes to localhost, topic room1/occupancy
+    python people_counter.py --fake-camera       # laptop testing without a physical webcam
+    python people_counter.py --no-mqtt           # local testing without an MQTT broker
+    python people_counter.py --show              # laptop preview window with bounding boxes
+    python people_counter.py --roi 0.0,0.2,1.0,1.0   # only count in part of the image
 
-Usage:
-    python3 people_counter.py                        # defaults
-    python3 people_counter.py --broker 192.168.1.50  # custom broker IP
-    python3 people_counter.py --room room2           # second room
-    python3 people_counter.py --headless              # no preview window
-    python3 people_counter.py --fake-camera           # laptop testing without a Pi camera
+Published payload (JSON) on <room>/occupancy, retained:
+    {"people": 7, "raw": 8, "ts": 1731000000.0, "infer_ms": 412, "source": "camera"}
+    source is "camera", "file" or "fake" so test data can never be mistaken for real data.
+
+Status on <room>/occupancy_status (retained):
+    "online"        counter running and camera working (re-sent on every MQTT reconnect)
+    "camera_error"  camera failed repeatedly; NO counts are published until it recovers
+    "offline"       sent on clean shutdown, or by the broker if this script dies
+The controller should treat anything other than "online", or a stale "ts", as
+"occupancy unknown" and fall back to air quality alone.
+
+The fake camera is opt-in only (--fake-camera). It is never used as an automatic fallback.
 """
 
 import argparse
 import json
-import logging
+import os
 import signal
+import statistics
 import sys
 import time
-from threading import Event
+from collections import deque
+
+# Avoid permissions error when writing Ultralytics config in sandboxed or macOS environments
+os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp/Ultralytics")
 
 import cv2
 import numpy as np
 import paho.mqtt.client as mqtt
+from ultralytics import YOLO
 
-# ---------------------------------------------------------------------------
-# Configuration defaults
-# ---------------------------------------------------------------------------
-DEFAULT_BROKER = "localhost"      # Pi 4 runs its own Mosquitto
-DEFAULT_PORT = 1883
-DEFAULT_ROOM = "room1"
-DEFAULT_INTERVAL = 2.0           # seconds between detections
-DEFAULT_CONFIDENCE = 0.40        # YOLO confidence threshold
-DEFAULT_MODEL = "yolov8n.pt"     # nano — fast enough for Pi 4 at ~2 fps
-FRAME_WIDTH = 640                # resize for speed; YOLO handles this internally too
-FRAME_HEIGHT = 480
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%H:%M:%S",
-)
-log = logging.getLogger("people_counter")
-
-# ---------------------------------------------------------------------------
-# Graceful shutdown
-# ---------------------------------------------------------------------------
-_shutdown = Event()
+running = True
 
 
-def _handle_signal(signum, _frame):
-    log.info("Caught signal %s — shutting down…", signal.Signals(signum).name)
-    _shutdown.set()
-
-
-signal.signal(signal.SIGINT, _handle_signal)
-signal.signal(signal.SIGTERM, _handle_signal)
-
-
-# ---------------------------------------------------------------------------
-# Camera abstraction
-# ---------------------------------------------------------------------------
-class PiCamera:
-    """Wraps Picamera2 for the real CSI camera on a Raspberry Pi."""
-
-    def __init__(self, width: int = FRAME_WIDTH, height: int = FRAME_HEIGHT):
-        from picamera2 import Picamera2          # import here so --fake-camera works on laptops
-
-        self._cam = Picamera2()
-        config = self._cam.create_still_configuration(
-            main={"size": (width, height), "format": "RGB888"},
-        )
-        self._cam.configure(config)
-        self._cam.start()
-        log.info("Pi camera started at %dx%d", width, height)
-
-    def capture(self) -> np.ndarray:
-        """Return a BGR numpy frame (OpenCV convention)."""
-        rgb = self._cam.capture_array()
-        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-
-    def close(self):
-        self._cam.stop()
+def _stop(*_):
+    global running
+    running = False
 
 
 class FakeCamera:
-    """
-    Generates synthetic frames with randomly placed 'person-shaped' rectangles.
-    Use this for testing the pipeline on a laptop without a Pi camera.
-    """
+    """Simulates a camera feed using built-in test images for testing on laptops."""
 
-    def __init__(self, width: int = FRAME_WIDTH, height: int = FRAME_HEIGHT, max_people: int = 12):
-        self.w = width
-        self.h = height
-        self.max_people = max_people
-        self._rng = np.random.default_rng(42)
-        log.info("Fake camera active — generating synthetic frames")
+    def __init__(self, width: int = 1280, height: int = 720):
+        self.width = width
+        self.height = height
+        self.images = []
 
-    def capture(self) -> np.ndarray:
-        frame = np.zeros((self.h, self.w, 3), dtype=np.uint8) + 30   # dark background
-        n = int(self._rng.integers(0, self.max_people + 1))
-        for _ in range(n):
-            # Random upright rectangle vaguely person-shaped
-            pw, ph = int(self._rng.integers(30, 60)), int(self._rng.integers(80, 160))
-            x1 = int(self._rng.integers(0, self.w - pw))
-            y1 = int(self._rng.integers(0, self.h - ph))
-            color = tuple(int(c) for c in self._rng.integers(100, 255, size=3))
-            cv2.rectangle(frame, (x1, y1), (x1 + pw, y1 + ph), color, -1)
-        return frame
+        try:
+            from ultralytics.utils import ASSETS
+            assets_dir = str(ASSETS)
+            for fname in ["bus.jpg", "zidane.jpg"]:
+                p = os.path.join(assets_dir, fname)
+                if os.path.exists(p):
+                    img = cv2.imread(p)
+                    if img is not None:
+                        self.images.append(img)
+        except Exception:
+            pass
 
-    def close(self):
+        if not self.images:
+            # Fallback synthetic frame with simulated people
+            dummy = np.zeros((height, width, 3), dtype=np.uint8) + 40
+            cv2.putText(dummy, "Fake Camera (No Images)", (50, 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+            self.images = [dummy]
+
+        self.idx = 0
+
+    def isOpened(self) -> bool:
+        return True
+
+    def grab(self) -> bool:
+        return True
+
+    def retrieve(self):
+        img = self.images[self.idx % len(self.images)]
+        self.idx += 1
+        frame = cv2.resize(img, (self.width, self.height))
+        return True, frame.copy()
+
+    def release(self):
         pass
 
 
-# ---------------------------------------------------------------------------
-# YOLO detector
-# ---------------------------------------------------------------------------
-class PersonDetector:
-    """
-    Thin wrapper around Ultralytics YOLOv8-nano.
-    Only counts class 0 ('person') detections above the confidence threshold.
-    """
-
-    PERSON_CLASS_ID = 0  # COCO class 0 = person
-
-    def __init__(self, model_path: str = DEFAULT_MODEL, confidence: float = DEFAULT_CONFIDENCE):
-        from ultralytics import YOLO
-        log.info("Loading YOLO model '%s' (this may take a moment on first run)…", model_path)
-        self._model = YOLO(model_path)
-        self._conf = confidence
-        log.info("Model loaded. Confidence threshold = %.2f", confidence)
-
-    def count_people(self, frame: np.ndarray) -> tuple[int, list]:
-        """
-        Run inference and return (count, list_of_bounding_boxes).
-        Each bbox is (x1, y1, x2, y2, confidence).
-        """
-        results = self._model(frame, conf=self._conf, verbose=False)
-        boxes = []
-        for r in results:
-            for box in r.boxes:
-                if int(box.cls[0]) == self.PERSON_CLASS_ID:
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    conf = float(box.conf[0])
-                    boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
-        return len(boxes), boxes
+def parse_args():
+    p = argparse.ArgumentParser(description="Webcam people counter -> MQTT")
+    p.add_argument("--room", default="room1", help="room name, used as MQTT topic prefix")
+    p.add_argument("--broker", default="localhost", help="MQTT broker host")
+    p.add_argument("--port", type=int, default=1883)
+    p.add_argument("--no-mqtt", action="store_true", help="run without MQTT publishing (console-only output)")
+    p.add_argument("--camera", default="0", help="camera index (0), device path (/dev/video0), or video/image file")
+    p.add_argument("--fake-camera", action="store_true", help="use built-in test images instead of physical webcam")
+    p.add_argument("--width", type=int, default=1280)
+    p.add_argument("--height", type=int, default=720)
+    p.add_argument("--model", default="yolov8n.pt",
+                   help="yolov8n.pt, or yolov8n_ncnn_model after exporting to NCNN")
+    p.add_argument("--imgsz", type=int, default=416, help="inference size; lower = faster")
+    p.add_argument("--conf", type=float, default=0.4, help="detection confidence threshold")
+    p.add_argument("--interval", type=float, default=2.0, help="seconds between counts")
+    p.add_argument("--window", type=int, default=5, help="median filter length (in counts)")
+    p.add_argument("--roi", default=None,
+                   help="x1,y1,x2,y2 as fractions 0-1 of the frame, e.g. 0,0.2,1,1")
+    p.add_argument("--show", action="store_true", help="show preview window (needs a display)")
+    p.add_argument("--max-frames", type=int, default=None, help="exit after processing N frames (useful for testing)")
+    return p.parse_args()
 
 
-# ---------------------------------------------------------------------------
-# Optional preview window (for debugging on a monitor attached to the Pi)
-# ---------------------------------------------------------------------------
-def draw_detections(frame: np.ndarray, boxes: list, count: int) -> np.ndarray:
-    """Annotate the frame with bounding boxes and the count banner."""
-    out = frame.copy()
-    for (x1, y1, x2, y2, conf) in boxes:
-        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        label = f"person {conf:.0%}"
-        cv2.putText(out, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+def open_camera(args):
+    if getattr(args, "fake_camera", False):
+        print("[counter] Using fake camera test feed")
+        return FakeCamera(width=args.width, height=args.height)
 
-    banner = f"People: {count}"
-    cv2.putText(out, banner, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 200, 255), 2)
-    return out
+    src = int(args.camera) if str(args.camera).isdigit() else args.camera
 
-
-# ---------------------------------------------------------------------------
-# MQTT helpers
-# ---------------------------------------------------------------------------
-def make_mqtt_client(broker: str, port: int, room: str) -> mqtt.Client:
-    client = mqtt.Client(client_id=f"{room}-people-counter", protocol=mqtt.MQTTv311)
-    client.enable_logger(log)
-
-    def on_connect(c, _ud, _flags, rc):
-        if rc == 0:
-            log.info("Connected to MQTT broker %s:%d", broker, port)
-        else:
-            log.error("MQTT connect failed with code %d", rc)
-
-    def on_disconnect(c, _ud, rc):
-        if rc != 0:
-            log.warning("Unexpected MQTT disconnect (rc=%d). Will auto-reconnect.", rc)
-
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.reconnect_delay_set(min_delay=1, max_delay=30)
-
-    try:
-        client.connect(broker, port, keepalive=60)
-    except OSError as e:
-        log.error("Cannot reach broker at %s:%d — %s. Will retry in background.", broker, port, e)
-
-    client.loop_start()          # non-blocking network loop in a background thread
-    return client
-
-
-def publish_count(client: mqtt.Client, topic: str, count: int):
-    payload = json.dumps({"people": count})
-    info = client.publish(topic, payload, qos=1, retain=True)
-    if info.rc == mqtt.MQTT_ERR_SUCCESS:
-        log.info("Published %s → %s", topic, payload)
+    # cv2.CAP_V4L2 is Linux-only. On macOS / Windows or when opening files, use CAP_ANY.
+    if sys.platform.startswith("linux") and (isinstance(src, int) or str(src).startswith("/dev/video")):
+        cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
     else:
-        log.warning("Publish to %s failed (rc=%d)", topic, info.rc)
+        cap = cv2.VideoCapture(src)
+
+    if not cap.isOpened() and not (isinstance(src, str) and os.path.exists(src)):
+        print(f"[counter] Warning: Camera '{args.camera}' could not be opened.")
+        if sys.platform == "darwin":
+            print("[counter] Tip: On macOS, ensure Terminal has Camera access in System Settings > Privacy & Security > Camera, or pass --fake-camera.")
+    else:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    return cap
 
 
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
+def fresh_frame(cap, flush=4):
+    """We only look at one frame every few seconds, so drop buffered (stale) frames first."""
+    for _ in range(flush):
+        cap.grab()
+    ok, frame = cap.retrieve()
+    return ok, frame
+
+
+def parse_roi(roi_str, w, h):
+    if not roi_str:
+        return 0, 0, w, h
+    x1, y1, x2, y2 = [float(v) for v in roi_str.split(",")]
+    return int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="YOLO-based people counter for ventilation control")
-    parser.add_argument("--broker", default=DEFAULT_BROKER, help="MQTT broker IP/hostname")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="MQTT broker port")
-    parser.add_argument("--room", default=DEFAULT_ROOM, help="Room identifier (e.g. room1, room2)")
-    parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL, help="Seconds between detections")
-    parser.add_argument("--confidence", type=float, default=DEFAULT_CONFIDENCE, help="YOLO confidence threshold")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Path to YOLO model weights")
-    parser.add_argument("--headless", action="store_true", help="Disable the OpenCV preview window")
-    parser.add_argument("--fake-camera", action="store_true", help="Use synthetic frames (for laptop testing)")
-    args = parser.parse_args()
+    args = parse_args()
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
 
     topic = f"{args.room}/occupancy"
-
-    # --- Camera ---
-    if args.fake_camera:
-        camera = FakeCamera()
-    else:
-        camera = PiCamera()
-
-    # --- Detector ---
-    detector = PersonDetector(model_path=args.model, confidence=args.confidence)
+    status_topic = f"{args.room}/occupancy_status"
 
     # --- MQTT ---
-    mqttc = make_mqtt_client(args.broker, args.port, args.room)
+    client = None
+    current_status = "online"  # what on_connect re-announces after a reconnect
 
-    # --- Loop ---
-    log.info("Starting detection loop (interval=%.1fs, topic=%s)", args.interval, topic)
-    last_count = -1  # force first publish
+    def set_status(value):
+        nonlocal current_status
+        current_status = value
+        print(f"[counter] status -> {value}")
+        if client:
+            client.publish(status_topic, value, qos=1, retain=True)
 
-    try:
-        while not _shutdown.is_set():
-            t0 = time.monotonic()
+    def on_connect(c, userdata, flags, rc, properties=None):
+        # Works for paho-mqtt 1.x and 2.x. Runs on every (re)connect, so the retained
+        # status can't get stuck on the broker's "offline" last-will after a network blip.
+        print(f"[counter] MQTT connected to {args.broker}:{args.port}")
+        c.publish(status_topic, current_status, qos=1, retain=True)
 
-            frame = camera.capture()
-            count, boxes = detector.count_people(frame)
+    if not args.no_mqtt:
+        # Support both paho-mqtt 2.x and 1.x
+        if hasattr(mqtt, "CallbackAPIVersion"):
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        else:
+            client = mqtt.Client(client_id=f"{args.room}-counter")
+        client.on_connect = on_connect
+        client.will_set(status_topic, "offline", qos=1, retain=True)
+        # connect_async never raises for an unreachable broker; it keeps retrying in the
+        # background, and on_connect above tells you when it actually succeeds.
+        client.connect_async(args.broker, args.port, keepalive=30)
+        client.loop_start()
+        print(f"[counter] publishing to {args.broker}:{args.port} topic '{topic}' "
+              f"(waiting for broker connection...)")
+    else:
+        print("[counter] running in --no-mqtt mode (console output only)")
 
-            # Only publish when the count changes (saves MQTT traffic & Firestore writes)
-            if count != last_count:
-                publish_count(mqttc, topic, count)
-                last_count = count
-            else:
-                log.debug("Count unchanged (%d) — skipping publish", count)
+    # --- Model + camera ---
+    model = YOLO(args.model)
+    cap = open_camera(args)
+    recent = deque(maxlen=max(1, args.window))
 
-            # Optional preview
-            if not args.headless:
-                annotated = draw_detections(frame, boxes, count)
-                cv2.imshow("People Counter", annotated)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    log.info("'q' pressed — shutting down")
-                    break
+    print(f"[counter] interval={args.interval}s, imgsz={args.imgsz}, conf={args.conf} (Ctrl+C to stop)")
 
-            # Sleep the remainder of the interval
-            elapsed = time.monotonic() - t0
-            sleep_time = max(0, args.interval - elapsed)
-            if sleep_time > 0:
-                _shutdown.wait(sleep_time)
+    next_t = time.monotonic()
+    retries = 0
+    frame_count = 0
 
-    finally:
-        log.info("Cleaning up…")
-        camera.close()
-        mqttc.loop_stop()
-        mqttc.disconnect()
-        if not args.headless:
+    while running:
+        if not cap.isOpened():
+            retries += 1
+            print(f"[counter] camera not open (attempt {retries}), retrying...")
+            if retries > 3 and current_status != "camera_error":
+                set_status("camera_error")  # stop pretending; controller falls back to air quality
+            cap.release()
+            time.sleep(min(retries, 5))
+            cap = open_camera(args)
+            continue
+
+        ok, frame = fresh_frame(cap)
+        if not ok or frame is None:
+            # Handle end-of-file for video files by looping
+            if isinstance(args.camera, str) and os.path.exists(args.camera):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, frame = fresh_frame(cap)
+
+            if not ok or frame is None:
+                retries += 1
+                print(f"[counter] frame grab failed (attempt {retries}), reopening camera")
+                if retries > 3 and current_status != "camera_error":
+                    set_status("camera_error")
+                cap.release()
+                time.sleep(min(retries, 5))
+                cap = open_camera(args)
+                continue
+
+        if current_status == "camera_error":
+            print("[counter] camera recovered")
+            recent.clear()  # don't blend pre-outage counts into the median
+            set_status("online")
+        retries = 0
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = parse_roi(args.roi, w, h)
+        crop = frame[y1:y2, x1:x2]
+
+        t0 = time.monotonic()
+        result = model(crop, classes=[0], conf=args.conf, imgsz=args.imgsz, verbose=False)[0]
+        infer_ms = int((time.monotonic() - t0) * 1000)
+
+        raw = len(result.boxes)
+        recent.append(raw)
+        people = int(round(statistics.median(recent)))
+
+        if args.fake_camera:
+            source = "fake"
+        elif os.path.exists(str(args.camera)):
+            source = "file"
+        else:
+            source = "camera"
+        payload = {"people": people, "raw": raw, "ts": round(time.time(), 1),
+                   "infer_ms": infer_ms, "source": source}
+        if client:
+            try:
+                client.publish(topic, json.dumps(payload), qos=0, retain=True)
+            except Exception as e:
+                print(f"[counter] publish error: {e}")
+
+        print(f"[counter] people={people} (raw {raw}, {infer_ms} ms)")
+
+        frame_count += 1
+        if args.max_frames and frame_count >= args.max_frames:
+            break
+
+        if args.show:
+            for bx1, by1, bx2, by2 in result.boxes.xyxy.int().tolist():
+                cv2.rectangle(frame, (bx1 + x1, by1 + y1), (bx2 + x1, by2 + y1), (0, 255, 0), 2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 160, 0), 1)  # ROI outline
+            cv2.putText(frame, f"People: {people}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.imshow("occupancy", frame)
+            if cv2.waitKey(1) == 27:  # Esc
+                break
+
+        # keep a steady cadence regardless of inference time
+        next_t += args.interval
+        delay = next_t - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        else:
+            next_t = time.monotonic()  # we're running slower than the interval; don't pile up
+
+    # --- clean shutdown ---
+    print("[counter] shutting down")
+    if client:
+        try:
+            info = client.publish(status_topic, "offline", qos=1, retain=True)
+            if hasattr(info, "wait_for_publish"):
+                info.wait_for_publish(timeout=1)
+        except Exception:
+            pass
+        try:
+            client.loop_stop()
+            client.disconnect()
+        except Exception:
+            pass
+    cap.release()
+    if args.show:
+        try:
             cv2.destroyAllWindows()
-        log.info("Done.")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ Run:
     python people_counter.py --show              # laptop preview window with bounding boxes
     python people_counter.py --roi 0.0,0.2,1.0,1.0   # only count in part of the image
 
-Published payload (JSON) on <room>/occupancy, retained:
+Published payload (JSON) on <room>/occupancy (NOT retained, so a restarted server never mistakes an old count for a live one):
     {"people": 7, "raw": 8, "ts": 1731000000.0, "infer_ms": 412, "source": "camera"}
     source is "camera", "file" or "fake" so test data can never be mistaken for real data.
 
@@ -272,7 +272,7 @@ def main():
                    "infer_ms": infer_ms, "source": source}
         if client:
             try:
-                client.publish(topic, json.dumps(payload), qos=0, retain=True)
+                client.publish(topic, json.dumps(payload), qos=0, retain=False)
             except Exception as e:
                 print(f"[counter] publish error: {e}")
 

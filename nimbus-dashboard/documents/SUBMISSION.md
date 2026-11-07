@@ -35,7 +35,7 @@ Nimbus counts the people in a room and watches the air getting stale. From that 
 - **Honest sensing.** Our gas sensor gives a relative reading, not CO₂. We set its threshold levels to match the sensor's own scale and label it "Gas level," not ppm. The control rules work on any scale, so a true CO₂ sensor is a one-line config change.
 - **Rules that agree with themselves.** Our first simulator drifted from the written rules. We moved everything into one rules module used by both the real room and the simulated rooms.
 - **A fan that looked lazy.** With the window open, the airflow math let the fan slow down as the air got worse. We added minimum fan speeds for stuffy and stale air, so the fan always visibly responds.
-- **Demoing weather indoors.** A dry day can't show the rain behavior, so we added a clearly labeled "Pretend rain is coming" demo setting.
+- **Demoing weather indoors.** The real forecast decides whether the window can open, so a dry day can't show the rain behavior and a rainy day can't show the window opening. We added two clearly labeled demo settings, "Pretend rain is coming" and "Pretend it's dry".
 - **[Hardware challenges from the build: wiring, power, servo calibration, sensor warm-up]**
 
 ## Accomplishments that we're proud of

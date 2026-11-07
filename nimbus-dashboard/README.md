@@ -97,6 +97,7 @@ All payloads are JSON. `room1` is the room id from `config/rooms.json`
 | `room1/occupancy` | Pi 4 camera counter | `{"people": 7}` (a bare `7` also works) |
 | `room1/cmd` | **this server**, every 5 s | `{"fan": 65, "window": 40, "reason": "8 people here and the air is getting stuffy (CO₂ 950 ppm). Fan at 65%, window open 40% while it's dry outside.", "mode": "auto"}` |
 | `room1/heartbeat` | **this server**, every 2 s | `{"t": 1794081813}` |
+| `room1/actuators` | Pi 4 fan + servo driver | `{"fan": 40, "window": 40, "failsafe": false}`: what it actually applied |
 | `room1/override` | **this server** (retained) | `{"mode": "manual", "fan": 80, "window": 0, "expiresAt": "2026-11-07T19:15:00.000Z"}` or `{"mode": "auto"}`. Informational: `cmd` already includes the override |
 
 Notes for the team:
@@ -110,34 +111,11 @@ Notes for the team:
 - The server ignores `room1/cmd` and `room1/context` from anyone else while it controls `room1`, so two controllers never fight. Set `CONTROL=none` to hand control to an external controller instead.
 - Field aliases are accepted: `co2` or `air` for `aq`, `temperature` for `temp`, `count` for `people`, `fanRpm` for `rpm`.
 
-### Minimal Python listener for the Pi 4 fan + servo
+### Device scripts
 
-```python
-import json, time
-import paho.mqtt.client as mqtt
-
-last_heard = time.time()
-
-def on_message(client, userdata, msg):
-    global last_heard
-    last_heard = time.time()
-    if msg.topic.endswith("/cmd"):
-        cmd = json.loads(msg.payload)
-        set_fan(cmd["fan"])        # 0-100 %
-        set_window(cmd["window"])  # 0-100 %, 0 = closed
-
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # paho-mqtt 2.x
-client.on_message = on_message
-client.on_connect = lambda c, *a: c.subscribe([("room1/cmd", 0), ("room1/heartbeat", 0)])
-client.connect("<laptop-ip>", 1883)
-client.loop_start()
-
-while True:  # fail-safe: never leave the window open without the server
-    if time.time() - last_heard > 10:
-        set_window(0)
-        set_fan(50)
-    time.sleep(0.5)
-```
+- **UNO Q:** `unoq/` is an Arduino App Lab app (sketch + Python). Set `BROKER` in `unoq/python/main.py` to this laptop's IP, start it in fresh air, and wait 3 minutes for the gas sensor to warm up.
+- **Pi 4 fan + window:** `pi4/actuators.py --broker <laptop-ip> --fan-pin 18 --servo-pin 13`. Run it with `--test` first to calibrate the window (0% must be closed). It reports what it applied on `room1/actuators`, shown under Devices as "Fan + window".
+- **Pi 4 people counter:** `people_counter/people_counter.py --broker <laptop-ip>`.
 
 ### Test the MQTT path without hardware
 
@@ -172,10 +150,12 @@ and obeys overrides from the dashboard.
 
 ### Demo setting: pretend rain is coming
 
-On a dry day, the room page's "Outside and schedule" panel has a
-**Pretend rain is coming** button. It forces the rain chance to 80% for every
-room, so the window closes and the reason says why. The dashboard labels the
-value "(demo setting)" while it's on. You can also start with `FORCE_RAIN=80`.
+The room page's "Outside and schedule" panel has two buttons.
+**Pretend rain is coming** forces the rain chance to 80% for every room, so the
+window closes and the reason says why. **Pretend it's dry** forces 0%, so the
+window can open on a rainy day. Press the active one again to go back to the
+real forecast. The dashboard labels the value "(demo setting)" while either is
+on. You can also start with `FORCE_RAIN=80` (or `0`).
 
 ## API
 

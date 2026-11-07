@@ -42,7 +42,8 @@ nimbus-dashboard/            server, controller, dashboard, simulator
   documents/NIMBUS_PROJECT.md  master project document (design, wiring, message formats, rules, demo plan)
   documents/SUBMISSION.md      submission writeup
 people_counter/              Pi 4 people counter (people_counter.py), Python controller (controller.py, not used while the server controls room1)
-unoq/                        UNO Q sensor sketch + bridge (in progress)
+pi4/actuators.py             Pi 4 fan + window servo driver with the 10 s fail-safe
+unoq/                        UNO Q App Lab app: gas sensor + barometer → room1/sensors
 ```
 
 ## Privacy

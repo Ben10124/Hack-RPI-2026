@@ -421,6 +421,7 @@ details.table-view summary { cursor: pointer; color: var(--ink-2); font-size: va
 .btn-quiet { background: transparent; color: var(--ink); }
 .btn:disabled { opacity: 0.5; cursor: wait; }
 .rain-demo { margin-top: 1rem; }
+.rain-demo .btn[aria-pressed='true'] { background: var(--ink); color: var(--fog); }
 .form-error { color: var(--bad); font-size: var(--s-14); margin: 0.5rem 0 0; }
 .held { margin: 0 0 1rem; font-size: var(--s-16); }
 .held strong { font-family: var(--display); font-weight: 650; }

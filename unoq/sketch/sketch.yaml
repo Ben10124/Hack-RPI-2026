@@ -1,0 +1,7 @@
+profiles:
+  default:
+    platforms:
+      - platform: arduino:zephyr
+    libraries:
+      - Seeed Arduino SPA06 (1.0.1)
+default_profile: default

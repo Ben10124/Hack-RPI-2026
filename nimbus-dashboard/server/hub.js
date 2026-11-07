@@ -18,9 +18,11 @@ const FIELDS = {
   occupancy: { people: 'people', count: 'people' },
   cmd: { fan: 'fanPct', window: 'windowCmd', reason: 'reason', mode: 'mode' },
   context: { booked: 'booked', rainChance: 'rainChance', outdoorTemp: 'outdoorTemp', nextEvent: 'nextEvent' },
+  // The device driving the fan and servo reports what it actually applied.
+  actuators: { window: 'windowPct', rpm: 'fanRpm', fanRpm: 'fanRpm' },
 };
 
-const SOURCE = { sensors: 'sensors', occupancy: 'camera', cmd: 'controller', context: 'controller' };
+const SOURCE = { sensors: 'sensors', occupancy: 'camera', cmd: 'controller', context: 'controller', actuators: 'actuators' };
 const PERCENT_FIELDS = new Set(['fanPct', 'windowPct', 'windowCmd', 'rainChance']);
 const TREND_WINDOW_MS = 60 * 60 * 1000;
 
@@ -79,7 +81,7 @@ class RoomHub extends EventEmitter {
     return this.rooms.get(id);
   }
 
-  // kind: sensors | occupancy | cmd | context
+  // kind: sensors | occupancy | cmd | context | actuators
   ingest(roomId, kind, payload) {
     if (!FIELDS[kind] || !isValidRoomId(roomId) || !payload || typeof payload !== 'object') return false;
     const room = this.ensureRoom(roomId);
@@ -295,7 +297,7 @@ function defaultRoom(id) {
     outdoorTemp: null,
     nextEvent: null,
     override: null,
-    lastSeen: { sensors: null, camera: null, controller: null },
+    lastSeen: { sensors: null, camera: null, controller: null, actuators: null },
     updatedAt: null,
   };
 }

@@ -1,0 +1,3 @@
+name: Nimbus sensors
+icon: 🌥️
+description: Reads the Grove Air Quality Sensor v1.3 and the Grove SPA06-003 barometer and publishes room1/sensors to the Nimbus server over MQTT.

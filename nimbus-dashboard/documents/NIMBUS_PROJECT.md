@@ -242,6 +242,10 @@ I2C addresses don't collide: barometer 0x77, SGP30 0x58, SCD30 0x61, SCD40 0x62,
 
 ### 8.1 Component specs
 
+**UNO Q app (`unoq/`, an Arduino App Lab app: `sketch/sketch.ino` + `python/main.py`)**
+
+The sketch reads the gas sensor 10× a second and sends a 1-second average, plus pressure and temperature, to Python with `Bridge.notify("nimbus_sample", ...)`. It finds the barometer on either I2C bus (header or Qwiic) at 0x77 or 0x76, using the Seeed Arduino SPA06 library. Python does the smoothing, warm-up and baseline below and publishes `room1/sensors` every 2 s. Set `BROKER` at the top of `python/main.py` to the laptop's IP. Restarting the app takes a new baseline, so start it in fresh air.
+
 **UNO Q sketch (C++)**
 - Read sensors every 1–2 s and pass them to the Linux side through the Bridge.
 - Grove Air Quality v1.3 (in the sketch or the bridge, either works):
@@ -258,12 +262,12 @@ I2C addresses don't collide: barometer 0x77, SGP30 0x58, SCD30 0x61, SCD40 0x62,
 - Publish `room1/sensors` every 1–2 s.
 - Reconnect to the broker automatically; never let a network error stop the sketch.
 
-**Fan + servo driver (Python, Pi 4)**
-- Subscribe to `room1/cmd` and `room1/heartbeat`. Apply `fan` (0–100%) and `window` (0% = closed, 100% = fully open; calibrate the servo angles on the model).
-- Safety watchdog: if no `cmd` or `heartbeat` arrives for 10 s, close the window and set the fan to 50% (section 11).
+**Fan + servo driver (Python, Pi 4: `pi4/actuators.py`)**
+- Subscribe to `room1/cmd` and `room1/heartbeat`. Apply `fan` (0–100%) and `window` (0% = closed, 100% = fully open). The servo moves gradually so the flap doesn't slam.
+- Safety watchdog: if no `cmd` or `heartbeat` arrives for 10 s, close the window and set the fan to 50% (section 11). It also starts in that state until the first `cmd`.
 - Clamp values to 0–100; ignore messages that don't parse.
-- Optional: publish `{"rpm": ..., "window": ...}` on `room1/sensors` (measured fan speed, actual window position). Fields merge with the UNO Q's.
-- A complete minimal example is in `nimbus-dashboard/README.md`.
+- Publish what it actually applied on `room1/actuators` every 2 s: `{"fan": 40, "window": 40, "failsafe": false}`. The dashboard shows the real window position and a "Fan + window" device. It uses its own topic, not `room1/sensors`, so it can never make the air sensors look alive when the UNO Q is down.
+- Pins, fan type (`pwm`, `hwpwm` for a 25 kHz 4-pin fan, `onoff`) and servo angles are command-line options. `--test` sweeps the fan and window once for calibration (0% must be closed); `--dry-run` runs without GPIO.
 
 **People counter (Python, Pi 4)**
 - Camera at a low resolution (for example 640×480) for speed.
@@ -302,6 +306,7 @@ Room id = `room1` (from `config/rooms.json`). Optional prefix via `MQTT_PREFIX`.
 | `room1/occupancy` | People counter | Server | `{"people": 7}` (bare `7` also accepted) |
 | `room1/cmd` | Server (controller) | Pi 4 fan + servo driver | `{"fan": 65, "window": 40, "reason": "8 people here and the air is getting stuffy (CO₂ 950 ppm). Fan at 65%, window open 40% while it's dry outside.", "mode": "auto"}` |
 | `room1/heartbeat` | Server (every 2 s) | Pi 4 fan + servo driver | `{"t": 1794081813}` (any payload) |
+| `room1/actuators` | Pi 4 fan + servo driver (every 2 s) | Server | `{"fan": 40, "window": 40, "failsafe": false}`: what is actually applied |
 | `room1/override` | Server (retained) | Informational | `{"mode": "manual", "fan": 80, "window": 0, "expiresAt": "2026-11-07T19:15:00.000Z"}` or `{"mode": "auto"}`. `cmd` already includes the hold |
 | `room1/context` | External controller only (`CONTROL=none`) | Server | `{"booked": 24, "rainChance": 70, "outdoorTemp": 8, "nextEvent": {"title": "Physics lecture", "start": "2026-11-07T15:00:00-05:00", "people": 24}}` |
 
@@ -460,7 +465,7 @@ Connected through `MONGODB_URI` (Atlas). Falls back to an in-memory store if not
 | POST | `/api/weather/rain` | Demo setting: `{"chance": 80}` forces the rain chance for every room |
 | DELETE | `/api/weather/rain` | Back to the real forecast |
 
-**Demo setting "Pretend rain is coming":** a button in the room page's "Outside and schedule" panel. While it's on, the rain chance shows "(demo setting)" and the footer says so, keeping the demo honest.
+**Demo weather settings:** two buttons in the room page's "Outside and schedule" panel. "Pretend rain is coming" forces 80% (window stays closed); "Pretend it's dry" forces 0% (window can open, for a rainy judging day). Press the active one again to return to the real forecast. While either is on, the rain chance shows "(demo setting)" and the footer says so, keeping the demo honest.
 
 **Socket.IO events:** `room` (live state), `reading` (new chart point), `decision` (new log entry), `status` (connection state).
 
@@ -564,12 +569,16 @@ Hack-RPI-2026/
 │   │   └── architecture.svg    Architecture diagram for the slide
 │   ├── .env.example
 │   └── README.md
-├── unoq/                       To build
-│   ├── sketch/sketch.ino       C++: sensors, LED matrix
-│   └── python/main.py          Bridge → MQTT
-├── pi4/                        To build
-│   ├── people_counter.py
-│   └── actuators.py            Fan + servo from room1/cmd, fail-safe
+├── unoq/                       UNO Q App Lab app (written, untested on hardware)
+│   ├── app.yaml
+│   ├── sketch/sketch.ino       C++: gas sensor + barometer → Bridge.notify
+│   ├── sketch/sketch.yaml      Library: Seeed Arduino SPA06
+│   └── python/main.py          Smoothing, baseline → room1/sensors over MQTT
+├── pi4/
+│   └── actuators.py            Fan + servo from room1/cmd, fail-safe (written, untested on hardware)
+└── people_counter/
+    ├── people_counter.py       USB webcam + YOLO → room1/occupancy
+    └── controller.py           Python controller (don't run while the server controls room1)
 ```
 
 ---
@@ -682,7 +691,9 @@ Pitch outline and architecture slide (Lead); submission writeup draft (Vision).
 | Override | Hold from a phone | Fan/window obey; "Manual" tag shows; expires on time |
 | Fail-safe | Stop the server or turn off the hotspot | Window closes within ~10 s |
 | Server fail-safe | Unplug the UNO Q and cover the camera | After 30 s the reason says "No recent data…" and the window closes |
-| Rain demo setting | Press "Pretend rain is coming" | Window closes, reason says rain is likely, "(demo setting)" shows |
+| Rain demo setting | Press "Pretend rain is coming", then "Pretend it's dry" | Window closes and the reason says rain is likely; then it can open again. "(demo setting)" shows |
+| Window calibration | `python pi4/actuators.py --test` on the Pi | 0% is closed, 100% fully open, fan follows; swap `--closed-angle` / `--open-angle` if reversed |
+| Pi script connected | Run `pi4/actuators.py` | Dashboard Devices shows "Fan + window" as recent; Window reading matches the flap |
 | Database | Atlas Browse Collections | `readings` growing; footer says time series |
 | Persistence | Restart the server | Room state and charts come back |
 

@@ -324,8 +324,9 @@
               <dt>Outdoors</dt><dd data-f="sky-outdoor"></dd>
               <dt class="wide" data-f="event-label">Booked</dt><dd class="wide" data-f="event"></dd>
             </dl>
-            <div class="button-row rain-demo">
-              <button class="btn btn-quiet" type="button" id="rain-toggle" aria-pressed="false">Pretend rain is coming</button>
+            <div class="button-row rain-demo" role="group" aria-label="Demo weather">
+              <button class="btn btn-quiet" type="button" data-rain="80" aria-pressed="false">Pretend rain is coming</button>
+              <button class="btn btn-quiet" type="button" data-rain="0" aria-pressed="false">Pretend it's dry</button>
             </div>
             <p class="form-error" id="rain-error" role="alert" hidden></p>
           </section>
@@ -336,6 +337,7 @@
               <li class="device"><span>Air sensors</span><span data-f="dev-sensors"></span></li>
               <li class="device"><span>People counter</span><span data-f="dev-camera"></span></li>
               <li class="device"><span>Controller</span><span data-f="dev-controller"></span></li>
+              <li class="device"><span>Fan + window</span><span data-f="dev-actuators"></span></li>
             </ul>
           </section>
 
@@ -355,7 +357,7 @@
       }),
     );
     setupOverrideForm(room);
-    $('#rain-toggle').addEventListener('click', toggleRain);
+    main.querySelectorAll('[data-rain]').forEach((btn) => btn.addEventListener('click', () => toggleRain(Number(btn.dataset.rain))));
     updateRainToggle();
     updateRoomLive(room);
     buildCharts();
@@ -405,7 +407,7 @@
       set('event', 'Nothing booked');
     }
 
-    for (const [key, label] of [['sensors', 'dev-sensors'], ['camera', 'dev-camera'], ['controller', 'dev-controller']]) {
+    for (const [key, label] of [['sensors', 'dev-sensors'], ['camera', 'dev-camera'], ['controller', 'dev-controller'], ['actuators', 'dev-actuators']]) {
       const seen = room.lastSeen?.[key];
       const lvl = !seen ? 'waiting' : isFresh(seen) ? 'fresh' : 'offline';
       set(label, statusHtml(lvl, seen ? fmtAgo(seen) : 'Not seen yet'));
@@ -500,24 +502,24 @@
   // ---------- demo setting: pretend rain is coming
 
   function updateRainToggle() {
-    const btn = $('#rain-toggle');
-    if (!btn) return;
-    const forced = isNum(state.status?.forcedRain);
-    btn.textContent = forced ? 'Stop pretending it will rain' : 'Pretend rain is coming';
-    btn.setAttribute('aria-pressed', String(forced));
+    const forced = state.status?.forcedRain;
+    main.querySelectorAll('[data-rain]').forEach((btn) => {
+      btn.setAttribute('aria-pressed', String(isNum(forced) && forced === Number(btn.dataset.rain)));
+    });
   }
 
-  async function toggleRain() {
-    const btn = $('#rain-toggle');
+  // Press a demo-weather button to force that rain chance; press it again for the real forecast.
+  async function toggleRain(chance) {
+    const buttons = [...main.querySelectorAll('[data-rain]')];
     const err = $('#rain-error');
-    const forced = isNum(state.status?.forcedRain);
+    const off = state.status?.forcedRain === chance;
     err.hidden = true;
-    btn.disabled = true;
+    buttons.forEach((b) => (b.disabled = true));
     try {
       state.status = await getJson('/api/weather/rain', {
-        method: forced ? 'DELETE' : 'POST',
-        headers: forced ? undefined : { 'Content-Type': 'application/json' },
-        body: forced ? undefined : JSON.stringify({ chance: 80 }),
+        method: off ? 'DELETE' : 'POST',
+        headers: off ? undefined : { 'Content-Type': 'application/json' },
+        body: off ? undefined : JSON.stringify({ chance }),
       });
       renderFooter();
       updateRainToggle();
@@ -525,7 +527,7 @@
       err.textContent = `${e.message} Nothing was changed.`;
       err.hidden = false;
     } finally {
-      btn.disabled = false;
+      buttons.forEach((b) => (b.disabled = false));
     }
   }
 

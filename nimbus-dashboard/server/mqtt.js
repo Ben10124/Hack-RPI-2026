@@ -5,6 +5,7 @@
 //              <prefix><room>/occupancy   from the Pi 4 camera counter
 //              <prefix><room>/cmd         from an external controller (fan, window, reason)
 //              <prefix><room>/context     from an external controller (calendar, weather)
+//              <prefix><room>/actuators   from the fan + servo driver (applied window position)
 // Publishes:   <prefix><room>/override    retained, for any external controller
 //              <prefix><room>/cmd         and <room>/heartbeat for rooms this
 //                                          server controls (via publish())
@@ -14,7 +15,7 @@
 
 const mqtt = require('mqtt');
 
-const KINDS = ['sensors', 'occupancy', 'cmd', 'context'];
+const KINDS = ['sensors', 'occupancy', 'cmd', 'context', 'actuators'];
 
 function startMqtt({ url, prefix, hub, onStatus, isControlled = () => false }) {
   if (!url) {

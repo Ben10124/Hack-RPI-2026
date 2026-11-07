@@ -1,0 +1,6 @@
+# Fan + window driver for the Raspberry Pi 4
+#   pip install -r requirements.txt
+# gpiozero and lgpio come with Raspberry Pi OS Bookworm. For --fan-mode hwpwm also:
+#   sudo apt install pigpio python3-pigpio && sudo systemctl enable --now pigpiod
+paho-mqtt>=1.6
+gpiozero

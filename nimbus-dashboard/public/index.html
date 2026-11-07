@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nimbus</title>
+  <meta name="description" content="Live ventilation dashboard: people, air quality, fan and window for every room.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M9 24h14a6 6 0 0 0 .8-11.95A8 8 0 0 0 8.4 13.3 5.5 5.5 0 0 0 9 24z' fill='%2315263B'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/vendor/fonts/bricolage/opsz.css">
+  <link rel="stylesheet" href="/vendor/fonts/atkinson/400.css">
+  <link rel="stylesheet" href="/vendor/fonts/atkinson/700.css">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <a class="wordmark" href="#/" aria-label="All rooms">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 24h14a6 6 0 0 0 .8-11.95A8 8 0 0 0 8.4 13.3 5.5 5.5 0 0 0 9 24z"/></svg>
+      <span id="site-name">Nimbus</span>
+    </a>
+    <span class="building" id="building-name"></span>
+    <span class="live" id="live" data-state="connecting"><span class="live-dot" aria-hidden="true"></span><span id="live-text">Connecting</span></span>
+  </header>
+
+  <div class="banner" id="offline-banner" hidden role="status">Lost connection to the server. Reconnecting…</div>
+
+  <main id="main" tabindex="-1"></main>
+
+  <footer class="footer" id="footer"></footer>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/vendor/chart.umd.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

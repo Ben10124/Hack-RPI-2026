@@ -1,0 +1,29 @@
+{
+  "name": "nimbus-dashboard",
+  "version": "1.0.0",
+  "description": "Live dashboard and MongoDB data layer for occupancy-aware ventilation",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "demo": "node server/index.js --demo",
+    "fake-devices": "node tools/fake-devices.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
+    "@fontsource/atkinson-hyperlegible": "^5.3.0",
+    "chart.js": "^4.6.1",
+    "dotenv": "^18.0.9",
+    "express": "^4.22.3",
+    "mongodb": "^6.22.0",
+    "mqtt": "^5.16.1",
+    "socket.io": "^4.8.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true,
+  "optionalDependencies": {
+    "aedes": "^1.2.0"
+  }
+}

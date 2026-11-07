@@ -2,16 +2,24 @@
   "siteName": "Nimbus",
   "buildingName": "Demo building",
   "airQuality": {
-    "label": "CO₂",
-    "unit": "ppm",
-    "good": 800,
-    "poor": 1200,
-    "note": "Set label, unit and thresholds to match your sensor. CO₂ ppm defaults shown."
+    "label": "Gas level",
+    "unit": "",
+    "good": 50,
+    "poor": 150,
+    "note": "Grove Air Quality Sensor v1.3: analog and relative, NOT CO2. Devices publish aq = smoothed 10-bit reading minus the fresh-air baseline. 50 / 150 match Seeed's 'low pollution' / 'high pollution' levels; tune after testing. For a true CO2 sensor use label CO₂, unit ppm, good 800, poor 1200."
   },
   "temperatureUnit": "F",
   "staleAfterSeconds": 30,
   "rooms": [
-    { "id": "room1", "name": "Room 101", "areaSqft": 900, "capacity": 30 },
+    {
+      "id": "room1",
+      "name": "Room 101",
+      "areaSqft": 900,
+      "capacity": 30,
+      "bookings": [
+        { "title": "Physics lecture", "start": "+8", "minutes": 20, "people": 24 }
+      ]
+    },
     { "id": "room2", "name": "Room 204", "areaSqft": 600, "capacity": 20 },
     { "id": "room3", "name": "Study lounge", "areaSqft": 400, "capacity": 12 }
   ]

@@ -9,6 +9,8 @@ const { createStore } = require('./store');
 const { RoomHub, isValidRoomId } = require('./hub');
 const { startMqtt } = require('./mqtt');
 const { SimEngine } = require('./sim-engine');
+const { Weather } = require('./weather');
+const { RoomController } = require('./controller');
 
 const ROOT = path.join(__dirname, '..');
 const NODE_MODULES = path.join(ROOT, 'node_modules');
@@ -42,11 +44,22 @@ async function main() {
   const server = http.createServer(app);
   const io = new Server(server);
 
+  const weather = new Weather({ lat: config.weatherLat, lon: config.weatherLon, forced: config.forceRain });
+
   const mqtt = startMqtt({
     url: config.mqttUrl,
     prefix: config.mqttPrefix,
     hub,
     onStatus: () => io.emit('status', statusPayload()),
+    isControlled: (roomId) => config.control.includes(roomId),
+  });
+
+  const controller = new RoomController({
+    hub,
+    site: config.site,
+    roomIds: config.control.filter((id) => hub.get(id)),
+    weather,
+    publish: mqtt.publish,
   });
 
   function statusPayload() {
@@ -57,6 +70,8 @@ async function main() {
       mqttUrl: config.mqttUrl || null,
       embeddedBroker: brokerRunning,
       simulated: config.simulate,
+      controlled: controller.roomIds,
+      forcedRain: weather.forced,
     };
   }
 
@@ -90,6 +105,26 @@ async function main() {
   api.get('/status', (req, res) => res.json(statusPayload()));
 
   api.get('/rooms', (req, res) => res.json(hub.list()));
+
+  // Demo setting: pretend rain is coming so the window stays closed.
+  const onWeatherChange = () => {
+    controller.decideAll();
+    io.emit('status', statusPayload());
+  };
+  api.post('/weather/rain', (req, res) => {
+    const chance = req.body?.chance === undefined ? 80 : Number(req.body.chance);
+    if (!Number.isFinite(chance) || chance < 0 || chance > 100) return res.status(400).json({ error: 'Rain chance must be between 0 and 100.' });
+    weather.setForced(chance);
+    console.log(`[weather] demo setting: rain chance forced to ${weather.forced}%`);
+    onWeatherChange();
+    res.json(statusPayload());
+  });
+  api.delete('/weather/rain', (req, res) => {
+    weather.setForced(null);
+    console.log('[weather] demo setting cleared, using the forecast again');
+    onWeatherChange();
+    res.json(statusPayload());
+  });
 
   api.param('id', (req, res, next, id) => {
     if (!isValidRoomId(id) || !hub.get(id)) return res.status(404).json({ error: `No room called "${id}".` });
@@ -141,12 +176,22 @@ async function main() {
       airQuality: config.site.airQuality,
       speed: Number(process.env.SIM_SPEED) || 6,
       send: (roomId, kind, payload) => hub.ingest(roomId, kind, payload),
+      forcedRain: () => weather.forced,
     });
     for (const room of hub.list()) if (room.override) sim.setOverride(room.id, room.override);
     hub.on('override', ({ roomId, override }) => sim.setOverride(roomId, override));
     sim.start(2000);
     console.log(`[sim] simulating ${rooms.map((r) => r.id).join(', ') || 'no rooms (check SIMULATE ids)'}`);
   }
+
+  if (controller.roomIds.length) {
+    // Re-decide right away when someone sets or clears a hold.
+    hub.on('override', ({ roomId }) => controller.controls(roomId) && controller.decideRoom(roomId));
+    weather.start();
+    controller.start();
+    console.log(`[controller] deciding fan and window for ${controller.roomIds.join(', ')} (publishes <room>/cmd and <room>/heartbeat)`);
+  }
+  if (weather.forced !== null) console.log(`[weather] demo setting: rain chance forced to ${weather.forced}%`);
 
   server.listen(config.port, () => {
     console.log(`[http] dashboard on http://localhost:${config.port}`);
@@ -155,6 +200,8 @@ async function main() {
   const shutdown = async () => {
     console.log('\nShutting down…');
     hub.stop();
+    controller.stop();
+    weather.stop();
     await Promise.all(hub.list().map((r) => store.saveRoom(r).catch(() => {})));
     await store.close();
     process.exit(0);

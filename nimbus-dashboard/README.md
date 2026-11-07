@@ -1,18 +1,21 @@
 # Nimbus dashboard
 
 Live web dashboard and MongoDB data layer for occupancy-aware ventilation.
-It listens to the room devices over MQTT, stores everything in MongoDB, and
-shows each room's people count, air quality, fan, window, charts, and the
-controller's reason for every decision. You can hold the fan and window
-manually from any phone or laptop.
+It listens to the room devices over MQTT, decides the fan speed and window
+opening for each real room, stores everything in MongoDB, and shows each
+room's people count, air quality, fan, window, charts, and the reason for
+every decision. You can hold the fan and window manually from any phone or
+laptop.
 
 ```
-UNO Q (sensors) ─┐
-Pi camera count ─┼─ MQTT ─► this server ─► MongoDB Atlas
-Pi 4 controller ─┘   ▲          │
-        ▲            │          └─► dashboard in the browser (live)
-        └── override ┘
+UNO Q (sensors) ────┐                    ┌─► MongoDB Atlas
+Pi 4 camera count ──┼─ MQTT ─► this server (controller)
+                    │            │       └─► dashboard in the browser (live)
+Pi 4 fan + servo ◄──┘ room1/cmd + room1/heartbeat
 ```
+
+The control rules live in `server/rules.js`. The real-room controller
+(`server/controller.js`) and the simulator both use them, so they always agree.
 
 ## Quick start (no hardware, no database)
 
@@ -92,37 +95,48 @@ All payloads are JSON. `room1` is the room id from `config/rooms.json`
 |---|---|---|
 | `room1/sensors` | UNO Q | `{"temp": 21.4, "pressure": 1012.6, "aq": 840, "rpm": 1450, "window": 40}` |
 | `room1/occupancy` | Pi 4 camera counter | `{"people": 7}` (a bare `7` also works) |
-| `room1/cmd` | Pi 4 controller | `{"fan": 65, "window": 40, "reason": "8 people and CO₂ rising. Fan at 65%, window open 40%.", "mode": "auto"}` |
-| `room1/context` | Pi 4 controller | `{"booked": 24, "rainChance": 70, "outdoorTemp": 8, "nextEvent": {"title": "Physics lecture", "start": "2026-11-07T15:00:00-05:00", "people": 24}}` |
-| `room1/override` | **this server** (retained) | `{"mode": "manual", "fan": 80, "window": 0, "expiresAt": "2026-11-07T19:15:00.000Z"}` or `{"mode": "auto"}` |
+| `room1/cmd` | **this server**, every 5 s | `{"fan": 65, "window": 40, "reason": "8 people here and the air is getting stuffy (CO₂ 950 ppm). Fan at 65%, window open 40% while it's dry outside.", "mode": "auto"}` |
+| `room1/heartbeat` | **this server**, every 2 s | `{"t": 1794081813}` |
+| `room1/override` | **this server** (retained) | `{"mode": "manual", "fan": 80, "window": 0, "expiresAt": "2026-11-07T19:15:00.000Z"}` or `{"mode": "auto"}`. Informational: `cmd` already includes the override |
 
 Notes for the team:
 
 - Temperatures are in °C. The dashboard converts to °F (`temperatureUnit` in `config/rooms.json`).
 - `window` in `sensors` is the measured position; `window` in `cmd` is the commanded one.
 - The `reason` sentence becomes the big headline on the room page. Write it for a person reading from across the room.
-- The controller should subscribe to `room1/override` and obey it until `expiresAt`. A `null` fan or window means "keep deciding that one automatically". The server also sends `{"mode": "auto"}` when a hold expires.
+- The device that drives the fan and servo subscribes to `room1/cmd` and applies `fan` and `window`. **It must close the window and run the fan at 50% on its own if it hears no `cmd` or `heartbeat` for 10 s.**
+- When neither the air sensors nor the camera have reported for 30 s, the server itself commands window closed, fan 50%.
+- Overrides from the dashboard are already applied in `cmd`. A `null` fan or window in a hold means "keep deciding that one automatically".
+- The server ignores `room1/cmd` and `room1/context` from anyone else while it controls `room1`, so two controllers never fight. Set `CONTROL=none` to hand control to an external controller instead.
 - Field aliases are accepted: `co2` or `air` for `aq`, `temperature` for `temp`, `count` for `people`, `fanRpm` for `rpm`.
 
-### Minimal Python publisher for the Pi 4 controller
+### Minimal Python listener for the Pi 4 fan + servo
 
 ```python
-import json
+import json, time
 import paho.mqtt.client as mqtt
 
+last_heard = time.time()
+
+def on_message(client, userdata, msg):
+    global last_heard
+    last_heard = time.time()
+    if msg.topic.endswith("/cmd"):
+        cmd = json.loads(msg.payload)
+        set_fan(cmd["fan"])        # 0-100 %
+        set_window(cmd["window"])  # 0-100 %, 0 = closed
+
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # paho-mqtt 2.x
-client.connect("127.0.0.1", 1883)  # Mosquitto on the Pi 4
+client.on_message = on_message
+client.on_connect = lambda c, *a: c.subscribe([("room1/cmd", 0), ("room1/heartbeat", 0)])
+client.connect("<laptop-ip>", 1883)
 client.loop_start()
 
-def publish_decision(fan, window, reason):
-    client.publish("room1/cmd", json.dumps({"fan": fan, "window": window, "reason": reason, "mode": "auto"}))
-
-def on_override(client, userdata, msg):
-    override = json.loads(msg.payload)
-    print("dashboard override:", override)  # hold fan/window until override["expiresAt"]
-
-client.subscribe("room1/override")
-client.on_message = on_override
+while True:  # fail-safe: never leave the window open without the server
+    if time.time() - last_heard > 10:
+        set_window(0)
+        set_fan(50)
+    time.sleep(0.5)
 ```
 
 ### Test the MQTT path without hardware
@@ -142,12 +156,26 @@ and obeys overrides from the dashboard.
 
 - `rooms`: id, display name, floor area (sq ft) and seat count for each room.
 - `airQuality`: label, unit and the "getting stuffy" and "needs air"
-  thresholds. Defaults are CO₂ in ppm (800 and 1200). If your sensor gives a
-  different scale, change these so the colors and charts make sense.
+  thresholds. Set for our **Grove Air Quality Sensor v1.3**: "Gas level", no
+  unit, 50 and 150, where the device publishes `aq` as its smoothed 10-bit
+  reading minus the fresh-air baseline (see the master doc, section 8.1). It is
+  a relative gas sensor, not CO₂. For a true CO₂ sensor use "CO₂", "ppm", 800
+  and 1200. Simulated rooms follow whichever scale is set.
 - `temperatureUnit`: `"F"` or `"C"` for display.
 - `staleAfterSeconds`: when a device counts as offline.
 
-`.env`: see `.env.example` for every option.
+- `bookings` (optional, per room): `[{"title": "Physics lecture", "start": "15:00", "minutes": 50, "people": 24}]`.
+  `start` is a time today (`HH:MM`), a full ISO date, or `+N` (N minutes after the server starts; room1 ships with a demo booking at `+8`). Used for pre-ventilation and no-show detection.
+
+`.env`: see `.env.example` for every option, including `CONTROL`,
+`WEATHER_LAT` / `WEATHER_LON` (default: RPI) and `FORCE_RAIN`.
+
+### Demo setting: pretend rain is coming
+
+On a dry day, the room page's "Outside and schedule" panel has a
+**Pretend rain is coming** button. It forces the rain chance to 80% for every
+room, so the window closes and the reason says why. The dashboard labels the
+value "(demo setting)" while it's on. You can also start with `FORCE_RAIN=80`.
 
 ## API
 
@@ -160,7 +188,9 @@ and obeys overrides from the dashboard.
 | GET | `/api/rooms/:id/summary?hours=24` | Peak people, average air quality, minutes needing air |
 | POST | `/api/rooms/:id/override` | Body `{"fan": 80, "window": 0, "minutes": 15}` |
 | DELETE | `/api/rooms/:id/override` | Return to automatic |
-| GET | `/api/status` | Database and MQTT connection state |
+| GET | `/api/status` | Database and MQTT connection state, controlled rooms, demo rain setting |
+| POST | `/api/weather/rain` | Demo setting: body `{"chance": 80}` forces the rain chance |
+| DELETE | `/api/weather/rain` | Back to the real forecast |
 
 Live updates reach the browser over Socket.IO (`room`, `reading`, `decision`, `status` events).
 
@@ -183,7 +213,10 @@ the internet drops (MongoDB writes resume when it comes back).
 server/
   index.js        web server, API, Socket.IO, startup
   hub.js          live room state, decisions, overrides, snapshots
-  mqtt.js         MQTT subscribe and override publish
+  rules.js        control rules (fan, window, reason), shared by controller and simulator
+  controller.js   decides fan + window for real rooms, publishes cmd + heartbeat
+  weather.js      Open-Meteo rain chance and the demo rain setting
+  mqtt.js         MQTT subscribe, cmd/heartbeat/override publish
   sim-engine.js   simulated rooms (also used by tools/fake-devices.js)
   store/          MongoDB store and in-memory fallback
 public/           the dashboard (HTML, CSS, JS)

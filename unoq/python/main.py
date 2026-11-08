@@ -24,7 +24,7 @@ import paho.mqtt.client as mqtt
 from arduino.app_utils import App, Bridge
 
 # ---- settings -------------------------------------------------------------------------
-BROKER = "192.168.1.50"  # <-- the LAPTOP's IP on the hotspot (Mac: ipconfig getifaddr en0)
+BROKER = "172.20.10.4"  # <-- the LAPTOP's IP on the hotspot (Mac: ipconfig getifaddr en0)
 PORT = 1883
 ROOM = "room1"
 PREFIX = ""              # set if the server uses MQTT_PREFIX, e.g. "nimbus/"

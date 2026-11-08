@@ -13,9 +13,15 @@
 // Library: "Seeed Arduino SPA06" (listed in sketch.yaml; App Lab installs it, or add it
 // from the library manager).
 
+// Set to 0 to build WITHOUT the barometer (if the Seeed Arduino SPA06 library can't be
+// installed). The gas sensor still works; pressure and temperature are just not sent.
+#define USE_BAROMETER 1
+
 #include <Arduino_RouterBridge.h>
 #include <Wire.h>
+#if USE_BAROMETER
 #include "SPL07-003.h"  // the Seeed SPA06 library's header (works for the SPA06-003)
+#endif
 
 const int GAS_PIN = A2;
 const unsigned long SAMPLE_MS = 100;       // read the gas sensor 10x a second...
@@ -26,7 +32,9 @@ const unsigned long BARO_RETRY_MS = 10000; // look for the barometer again if it
 const float NO_PRESSURE = 0.0;
 const float NO_TEMP = -999.0;
 
+#if USE_BAROMETER
 SPL07_003 baro;
+#endif
 bool baroOk = false;
 float pressureHpa = NO_PRESSURE;
 float tempC = NO_TEMP;
@@ -37,6 +45,7 @@ unsigned long lastSample = 0;
 unsigned long lastReport = 0;
 unsigned long lastBaroTry = 0;
 
+#if USE_BAROMETER
 bool startBaro(TwoWire &bus, uint8_t addr) {
   bus.begin();
   if (!baro.begin(addr, &bus)) return false;
@@ -51,6 +60,12 @@ void findBaro() {
   baroOk = startBaro(Wire, SPL07_ADDR_DEF) || startBaro(Wire1, SPL07_ADDR_DEF) ||
            startBaro(Wire, SPL07_ADDR_ALT) || startBaro(Wire1, SPL07_ADDR_ALT);
 }
+#else
+void findBaro() {
+  lastBaroTry = millis();
+  baroOk = false;
+}
+#endif
 
 void setup() {
   // 10-bit readings (0-1023), so the 50 / 150 thresholds match Seeed's scale.
@@ -69,6 +84,7 @@ void loop() {
     gasCount++;
   }
 
+#if USE_BAROMETER
   if (baroOk && (baro.pressureAvailable() || baro.temperatureAvailable())) {
     double p = baro.readPressure() / 100.0;  // Pa -> hPa
     double t = baro.readTemperature();
@@ -76,6 +92,7 @@ void loop() {
     tempC = (t > -40.0 && t < 85.0) ? (float)t : NO_TEMP;
   }
   if (!baroOk && now - lastBaroTry >= BARO_RETRY_MS) findBaro();
+#endif
 
   if (now - lastReport >= REPORT_MS && gasCount > 0) {
     lastReport = now;

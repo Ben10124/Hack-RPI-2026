@@ -1,4 +1,4 @@
-# Nimbus: Occupancy-Aware Ventilation
+# Aerolite: Occupancy-Aware Ventilation
 
 Master project document. Theme: **"In the clouds."**
 Team of 4. Build window: 6 hours on day 1 (≈2:40–8:35 PM), 3 hours on day 2 (8:00–11:00).
@@ -46,11 +46,11 @@ Team of 4. Build window: 6 hours on day 1 (≈2:40–8:35 PM), 3 hours on day 2 
 
 ## 1. Summary
 
-**One-liner:** Nimbus watches how many people are in a room and how stale the air is getting, then runs the fan and opens or closes the window on its own, closing it before rain arrives, and explains every decision on a live dashboard.
+**One-liner:** Aerolite watches how many people are in a room and how stale the air is getting, then runs the fan and opens or closes the window on its own, closing it before rain arrives, and explains every decision on a live dashboard.
 
 **Core idea:** Ventilation should follow people, not a fixed schedule. A camera counts occupants (privately, on the device), sensors measure the air, a controller decides fan speed and window position, and everything streams to a cloud database and a live web dashboard.
 
-**Name:** "Nimbus" (a rain cloud) is the working name. Alternatives considered: "Silver Lining," "SkyVent." Change `siteName` in `config/rooms.json` if the team picks another.
+**Name:** "Aerolite" (renamed from the working name "Nimbus"). The dashboard shows the name from `siteName` in `config/rooms.json`. Folder names (`nimbus-dashboard/`, this file), the MongoDB database name (`nimbus`) and internal identifiers keep the old name so nothing that is already running or stored breaks.
 
 **Tagline for the close of the pitch:** "Ventilation that follows people, reads the clouds, and explains itself."
 
@@ -69,7 +69,7 @@ Team of 4. Build window: 6 hours on day 1 (≈2:40–8:35 PM), 3 hours on day 2 
 
 ## 3. Solution
 
-Nimbus combines four inputs to decide two outputs, and shows its reasoning.
+Aerolite combines four inputs to decide two outputs, and shows its reasoning.
 
 | Inputs | Outputs |
 |---|---|
@@ -93,11 +93,11 @@ Nimbus combines four inputs to decide two outputs, and shows its reasoning.
 
 **Theme ("In the clouds"), three connections to state in the pitch:**
 
-1. **Breath clouds:** a full room fills with an invisible cloud of exhaled breath and stale air. Nimbus senses the air going stale and clears it. (Say "stale air," not "CO₂": our Grove sensor is a relative gas sensor, see section 6.2.)
+1. **Breath clouds:** a full room fills with an invisible cloud of exhaled breath and stale air. Aerolite senses the air going stale and clears it. (Say "stale air," not "CO₂": our Grove sensor is a relative gas sensor, see section 6.2.)
 2. **Weather clouds:** rain clouds (via barometric pressure trend and forecast) decide whether the window opens.
 3. **The cloud:** all data streams to MongoDB Atlas and a live web dashboard.
 
-| Criterion | How Nimbus scores |
+| Criterion | How Aerolite scores |
 |---|---|
 | Theme adherence | Three distinct meanings of "cloud," all doing real work |
 | Effort | Four coordinated subsystems: firmware, computer vision, control logic, full-stack web + cloud database |
@@ -500,7 +500,7 @@ Connected through `MONGODB_URI` (Atlas). Falls back to an in-memory store if not
 
 ```json
 {
-  "siteName": "Nimbus",
+  "siteName": "Aerolite",
   "buildingName": "Demo building",
   "airQuality": { "label": "Gas level", "unit": "", "good": 50, "poor": 150 },
   "temperatureUnit": "F",
@@ -532,7 +532,7 @@ Optional per room, for pre-ventilation and no-show detection:
 | `MONGODB_URI` | empty | Atlas connection string; empty = in-memory |
 | `MONGODB_DB` | nimbus | Database name |
 | `MQTT_URL` | empty | External broker, e.g. `mqtt://192.168.1.50:1883` |
-| `MQTT_PREFIX` | empty | Topic prefix, e.g. `nimbus/` |
+| `MQTT_PREFIX` | empty | Topic prefix, e.g. `aerolite/` |
 | `EMBEDDED_BROKER` | 0 | 1 = run a broker inside the server |
 | `EMBEDDED_BROKER_PORT` | 1883 | Broker port |
 | `SIMULATE` | empty | `all`, or a comma list of room ids |
@@ -774,7 +774,7 @@ Pitch outline and architecture slide (Lead); submission writeup draft (Vision).
 
 ### Long term and broader impact
 
-- **Energy:** ventilation that follows real occupancy can avoid conditioning outdoor air for empty rooms. Demand-controlled ventilation is an established energy-saving strategy in commercial buildings; Nimbus makes it affordable for rooms that have no sensors today.
+- **Energy:** ventilation that follows real occupancy can avoid conditioning outdoor air for empty rooms. Demand-controlled ventilation is an established energy-saving strategy in commercial buildings; Aerolite makes it affordable for rooms that have no sensors today.
 - **Health and learning:** better-ventilated classrooms support concentration and can reduce the spread of airborne illness. Aggregated, anonymized data could show schools which rooms chronically need attention.
 - **Space utilization:** no-show detection tells building managers which booked rooms go unused, freeing them for others.
 - **Equity:** low-cost hardware can bring ventilation monitoring to older schools and dorms that lack modern building management systems.
@@ -835,6 +835,7 @@ Pitch outline and architecture slide (Lead); submission writeup draft (Vision).
 | Fan and servo driven from the Pi 4; fail-safe watchdog moves there | Fan and servo already work on the Pi 4; UNO Q PWM/servo support on Zephyr was unproven | UNO Q drives fan + servo |
 | Window stays closed when pressure falls ≤ −0.5 hPa/h; reasons name the real cause | Code didn't match section 10.2 and could blame falling pressure when the air was simply fresh | — |
 | Grove v1.3 shown as "Gas level", baseline-relative, thresholds 50 / 150 | It's a relative gas sensor, not CO₂; higher-is-worse reads clearly on screen; 50 / 150 match Seeed's own "low" / "high pollution" levels | "Air quality" label; raw readings with per-board thresholds |
+| Renamed the project from Nimbus to Aerolite | Team decision | Kept "Nimbus" |
 | Fan floor of 40% (stuffy) / 70% (needs air) | Without it the fan slowed down as the air got worse, because the open window took over the airflow; judges would see the opposite of what we claim | Resizing room1 to the shoebox |
 | "Pretend rain is coming" demo setting, labeled on screen | The rain behavior must be demonstrable on a dry day without hiding that it's forced | Waiting for real rain |
 | MQTT for device messages | Lightweight, standard for IoT, many-to-many | HTTP polling, direct serial |

@@ -436,7 +436,7 @@ function onRoom(room) {
   const first = state.room === null;
   state.room = room;
   if (first) {
-    document.title = `${room.name} · 3D model room · Nimbus`;
+    document.title = `${room.name} · 3D model room · Aerolite`;
     set($('#title'), `${room.name}: 3D model room`);
     set($('#back-text'), `${room.name} dashboard`);
     $('#back').href = `/#/room/${encodeURIComponent(room.id)}`;

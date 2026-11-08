@@ -145,7 +145,7 @@
     const first = state.room === null;
     state.room = room;
     if (first) {
-      document.title = `${room.name} · Virtual model room · Nimbus`;
+      document.title = `${room.name} · Virtual model room · Aerolite`;
       set($('#title'), `${room.name}: virtual model room`);
       set($('#back-text'), `${room.name} dashboard`);
       $('#back').href = `/#/room/${encodeURIComponent(room.id)}`;

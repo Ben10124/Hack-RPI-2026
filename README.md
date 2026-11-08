@@ -1,9 +1,9 @@
-# Nimbus: occupancy-aware ventilation
+# Aerolite: occupancy-aware ventilation
 
 **Ventilation that follows people, reads the clouds, and explains itself.**
 Built at HackRPI 2026, theme "In the clouds."
 
-Nimbus counts the people in a room and watches the air going stale. It then
+Aerolite counts the people in a room and watches the air going stale. It then
 runs the fan and opens or closes the window on its own. It keeps the window
 shut when rain is likely or the pressure is falling, and explains every
 decision in one plain sentence on a live dashboard.

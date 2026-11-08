@@ -31,7 +31,12 @@ npm install
 npm run demo        # no hardware, no database: three simulated rooms
 ```
 
-Open http://localhost:3000. For the real room plus simulated ones, the
+Open http://localhost:3000. Each room page links to a **3D model room**
+(`/model3d.html#room1`): a live 3D model of the room whose window and fan
+follow the controller's decisions, for demos without the fan and servo
+hardware. It's labeled as simulated.
+
+For the real room plus simulated ones, the
 MQTT topics, MongoDB setup and the API, see
 [nimbus-dashboard/README.md](nimbus-dashboard/README.md).
 

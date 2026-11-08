@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Virtual model room · Nimbus</title>
+  <meta name="description" content="A simulated fan and window that follow the Nimbus controller's live decisions.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M9 24h14a6 6 0 0 0 .8-11.95A8 8 0 0 0 8.4 13.3 5.5 5.5 0 0 0 9 24z' fill='%2315263B'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/vendor/fonts/bricolage/opsz.css">
+  <link rel="stylesheet" href="/vendor/fonts/atkinson/400.css">
+  <link rel="stylesheet" href="/vendor/fonts/atkinson/700.css">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .sim-note { max-width: var(--measure); color: var(--ink-2); font-size: var(--s-16); margin: 0.75rem 0 0; }
+    .tag-sim { border-color: var(--series); color: var(--series); font-weight: 700; }
+    .model-page .reason { margin: 1.25rem 0 1rem; }
+
+    .sim-status { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.75rem; font-size: var(--s-16); font-weight: 700; }
+    .sim-status::before { content: ''; width: 0.65rem; height: 0.65rem; border-radius: 50%; background: var(--muted); flex: none; }
+    .sim-status[data-state='live']::before { background: var(--good); }
+    .sim-status[data-state='failsafe']::before,
+    .sim-status[data-state='lost']::before { background: var(--bad); }
+
+    .scene { margin: 0 0 2rem; background: var(--paper); border-radius: 16px; padding: clamp(0.5rem, 2vw, 1.5rem); }
+    .scene svg { display: block; width: 100%; height: auto; max-height: 64vh; }
+
+    .room-fill { fill: var(--fog); }
+    .walls path { fill: none; stroke: var(--ink); stroke-width: 6; stroke-linecap: round; }
+    .flap { fill: var(--paper); stroke: var(--ink); stroke-width: 3; }
+    .flap-pane { stroke: var(--series); stroke-width: 3; stroke-linecap: round; }
+    .hinge, .hub { fill: var(--ink); }
+    .fan-housing { fill: var(--paper); stroke: var(--ink); stroke-width: 5; }
+    .blade { fill: var(--series); }
+    .haze ellipse { fill: var(--muted); }
+    .flow path { fill: none; stroke: var(--series); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 16; }
+    .person { fill: var(--ink-2); }
+    .cloud { fill: var(--muted); }
+    .rain line { stroke: var(--series); stroke-width: 3; stroke-linecap: round; }
+    .chev path { fill: none; stroke: var(--series); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+    .cap-label { font: 700 16px var(--text); fill: var(--muted); }
+    .cap-value { font: 600 26px var(--display); fill: var(--ink); letter-spacing: -0.02em; }
+    .more { font: 700 22px var(--text); fill: var(--ink-2); }
+    .chip rect { fill: var(--bad); }
+    .chip text { font: 700 15px var(--text); fill: #fff; letter-spacing: 0.06em; }
+  </style>
+</head>
+<body class="model-page">
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <a class="wordmark" href="/" aria-label="All rooms">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 24h14a6 6 0 0 0 .8-11.95A8 8 0 0 0 8.4 13.3 5.5 5.5 0 0 0 9 24z"/></svg>
+      <span>Nimbus</span>
+    </a>
+    <span class="building">Virtual model room</span>
+    <span class="live" id="live" data-state="connecting"><span class="live-dot" aria-hidden="true"></span><span id="live-text">Connecting</span></span>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <a class="crumb" id="back" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span id="back-text">Room dashboard</span></a>
+    <div class="room-head">
+      <h1 class="room-title" id="title">Virtual model room</h1>
+      <span class="tags"><span class="tag tag-sim">Simulated fan and window</span><span class="tag tag-manual" id="manual-tag" hidden>Manual</span></span>
+    </div>
+    <p class="sim-note">The real fan and window servo aren't connected, so this page plays their part. It follows the same live decisions the Pi would receive, swings the window at servo speed and spins the fan at the commanded speed. If decisions stop for 10 seconds, it does what the real device does: closes the window and runs the fan at 50%.</p>
+
+    <p class="reason" id="reason">Loading…</p>
+
+    <figure class="scene">
+      <p class="sim-status" id="sim-status" data-state="waiting" role="status">Connecting to the server…</p>
+      <svg viewBox="0 0 900 470" role="img" aria-labelledby="scene-title">
+        <title id="scene-title">Simulated model room</title>
+        <defs>
+          <filter id="haze-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="22"/></filter>
+          <clipPath id="room-clip"><rect x="183" y="93" width="554" height="324"/></clipPath>
+        </defs>
+
+        <!-- Outside: rain cloud -->
+        <g transform="translate(40 20) scale(4.2)"><path class="cloud" d="M9 24h14a6 6 0 0 0 .8-11.95A8 8 0 0 0 8.4 13.3 5.5 5.5 0 0 0 9 24z"/></g>
+        <g id="rain" class="rain" opacity="0">
+          <g id="rain-lines">
+            <line x1="70" y1="130" x2="62" y2="150"/><line x1="96" y1="122" x2="88" y2="142"/>
+            <line x1="122" y1="132" x2="114" y2="152"/><line x1="148" y1="124" x2="140" y2="144"/>
+            <line x1="82" y1="160" x2="74" y2="180"/><line x1="108" y1="154" x2="100" y2="174"/>
+            <line x1="134" y1="162" x2="126" y2="182"/>
+          </g>
+        </g>
+
+        <!-- Room -->
+        <rect class="room-fill" x="180" y="90" width="560" height="330"/>
+        <g id="flow" class="flow" opacity="0">
+          <path d="M196 180 C 360 130, 560 150, 712 196"/>
+          <path d="M196 220 C 380 210, 560 220, 712 206"/>
+          <path d="M196 262 C 380 300, 560 270, 712 216"/>
+        </g>
+        <g id="people"></g>
+        <text id="people-more" class="more" x="700" y="410"></text>
+        <g clip-path="url(#room-clip)">
+          <g id="haze" class="haze" filter="url(#haze-blur)" opacity="0">
+            <ellipse cx="330" cy="290" rx="120" ry="70"/>
+            <ellipse cx="480" cy="250" rx="140" ry="80"/>
+            <ellipse cx="610" cy="300" rx="110" ry="65"/>
+            <ellipse cx="440" cy="180" rx="120" ry="55"/>
+          </g>
+        </g>
+
+        <g class="walls">
+          <path d="M170 90 H750"/>
+          <path d="M180 90 V150 M180 280 V420"/>
+          <path d="M740 90 V153 M740 257 V420"/>
+          <path d="M150 420 H770"/>
+        </g>
+
+        <!-- Window: top-hinged flap that swings outward -->
+        <g id="inflow" class="chev" opacity="0">
+          <path d="M100 203 l12 12 l-12 12"/><path d="M124 203 l12 12 l-12 12"/><path d="M148 203 l12 12 l-12 12"/>
+        </g>
+        <g id="flap" transform="rotate(0 180 150)">
+          <rect class="flap" x="175" y="150" width="10" height="130" rx="3"/>
+          <line class="flap-pane" x1="180" y1="162" x2="180" y2="268"/>
+        </g>
+        <circle class="hinge" cx="180" cy="150" r="5"/>
+        <text class="cap-label" x="24" y="318">Window</text>
+        <text class="cap-value" id="window-cap" x="24" y="350">Closed</text>
+
+        <!-- Exhaust fan in the right wall -->
+        <circle class="fan-housing" cx="740" cy="205" r="52"/>
+        <g id="blades">
+          <ellipse class="blade" cx="740" cy="180" rx="11" ry="22"/>
+          <ellipse class="blade" cx="740" cy="180" rx="11" ry="22" transform="rotate(90 740 205)"/>
+          <ellipse class="blade" cx="740" cy="180" rx="11" ry="22" transform="rotate(180 740 205)"/>
+          <ellipse class="blade" cx="740" cy="180" rx="11" ry="22" transform="rotate(270 740 205)"/>
+        </g>
+        <circle class="hub" cx="740" cy="205" r="10"/>
+        <g id="exhaust" class="chev" opacity="0">
+          <path d="M806 193 l12 12 l-12 12"/><path d="M830 193 l12 12 l-12 12"/><path d="M854 193 l12 12 l-12 12"/>
+        </g>
+        <text class="cap-label" x="772" y="318">Exhaust fan</text>
+        <text class="cap-value" id="fan-cap" x="772" y="350">0%</text>
+
+        <!-- Fail-safe / waiting chip -->
+        <g id="chip" class="chip" opacity="0">
+          <rect x="330" y="30" width="240" height="36" rx="18"/>
+          <text id="chip-text" x="450" y="54" text-anchor="middle">FAIL-SAFE</text>
+        </g>
+      </svg>
+    </figure>
+
+    <section class="readings" aria-label="Simulated room state">
+      <div class="reading"><span class="metric-label">People</span><span class="metric-value" data-f="people">–</span><span class="metric-sub" data-f="people-sub"></span></div>
+      <div class="reading"><span class="metric-label" data-f="aq-label">Gas level</span><span class="metric-value" data-f="aq">–</span><span class="metric-sub" data-f="aq-sub"></span></div>
+      <div class="reading"><span class="metric-label">Fan (simulated)</span><span class="metric-value" data-f="fan">–</span><span class="metric-sub" data-f="fan-sub"></span></div>
+      <div class="reading"><span class="metric-label">Window (simulated)</span><span class="metric-value" data-f="window">–</span><span class="metric-sub" data-f="window-sub"></span></div>
+      <div class="reading"><span class="metric-label">Control</span><span class="metric-value" data-f="mode">–</span><span class="metric-sub" data-f="mode-sub"></span></div>
+      <div class="reading"><span class="metric-label">Rain chance</span><span class="metric-value" data-f="rain">–</span><span class="metric-sub" data-f="rain-sub"></span></div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/model.js"></script>
+</body>
+</html>

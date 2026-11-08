@@ -239,6 +239,7 @@
       <div class="room-head">
         <h1 class="room-title" tabindex="-1" id="room-title">${esc(room.name)}</h1>
         <span class="tags" data-f="tags"></span>
+        <a class="sim-link" href="/model3d.html#${esc(encodeURIComponent(room.id))}" target="_blank" rel="noopener">3D model room</a>
         <span class="updated" data-f="updated"></span>
       </div>
       <p class="reason" id="reason"></p>

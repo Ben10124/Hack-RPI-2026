@@ -148,6 +148,32 @@ and obeys overrides from the dashboard.
 `.env`: see `.env.example` for every option, including `CONTROL`,
 `WEATHER_LAT` / `WEATHER_LON` (default: RPI) and `FORCE_RAIN`.
 
+### 3D model room (when the fan and servo aren't connected)
+
+Open **http://localhost:3000/model3d.html#room1**, or click **3D model room**
+next to a room's name on its dashboard page. It's a live 3D model of the room
+that plays the part of the fan and the window servo:
+
+- It follows the same live decisions the Pi would receive (`room1/cmd`).
+- The top-hinged window swings outward at servo speed, and the exhaust fan
+  spins up and down with some inertia.
+- Inside: one figure per person counted, airflow particles drifting from the
+  window to the fan (faster with more airflow), and a haze that thickens as the
+  gas level rises. Outside: a cloud, with rain when rain is likely.
+- Fail-safe, like the real device: if decisions stop for 10 s, the window
+  closes and the fan runs at 50%. Stop the server to show it; the page keeps
+  running.
+- Drag to look around, scroll or pinch to zoom. It slowly turns on its own until
+  you touch it (not if the system asks for reduced motion).
+- The page says "Simulated fan and window", so it's never mistaken for the
+  hardware. Any room id works after the `#`, including simulated rooms.
+
+A flat 2D version is at `/model.html#room1` (linked from the 3D page), for
+devices without WebGL.
+
+three.js (r187, MIT license) is served from `public/vendor/three/`, so the 3D
+page works without internet, like the rest of the dashboard.
+
 ### Demo setting: pretend rain is coming
 
 The room page's "Outside and schedule" panel has two buttons.

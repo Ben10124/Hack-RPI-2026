@@ -268,6 +268,15 @@ main:focus { outline: none; }
   margin: 0;
 }
 .updated { margin-left: auto; font-size: var(--s-14); color: var(--muted); }
+.sim-link {
+  font-size: var(--s-14);
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.15rem 0.7rem;
+}
+.sim-link:hover { border-color: var(--ink); }
 
 .reason {
   font-family: var(--display);

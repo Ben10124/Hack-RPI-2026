@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3D model room · Nimbus</title>
+  <meta name="description" content="A 3D simulated fan and window that follow the Nimbus controller's live decisions.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M9 24h14a6 6 0 0 0 .8-11.95A8 8 0 0 0 8.4 13.3 5.5 5.5 0 0 0 9 24z' fill='%2315263B'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/vendor/fonts/bricolage/opsz.css">
+  <link rel="stylesheet" href="/vendor/fonts/atkinson/400.css">
+  <link rel="stylesheet" href="/vendor/fonts/atkinson/700.css">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .sim-note { max-width: var(--measure); color: var(--ink-2); font-size: var(--s-16); margin: 0.75rem 0 0; }
+    .tag-sim { border-color: var(--series); color: var(--series); font-weight: 700; }
+    .model-page .reason { margin: 1.25rem 0 1rem; }
+
+    .sim-status { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.75rem; font-size: var(--s-16); font-weight: 700; }
+    .sim-status::before { content: ''; width: 0.65rem; height: 0.65rem; border-radius: 50%; background: var(--muted); flex: none; }
+    .sim-status[data-state='live']::before { background: var(--good); }
+    .sim-status[data-state='failsafe']::before,
+    .sim-status[data-state='lost']::before { background: var(--bad); }
+
+    .scene { margin: 0 0 2rem; background: var(--paper); border-radius: 16px; padding: clamp(0.5rem, 2vw, 1.25rem); }
+    .stage { position: relative; height: clamp(340px, 60vh, 680px); border-radius: 12px; overflow: hidden; touch-action: none; cursor: grab; }
+    .stage:active { cursor: grabbing; }
+    .stage canvas { display: block; width: 100%; height: 100%; }
+    .stage-label { position: absolute; left: 0; top: 0; pointer-events: none; white-space: nowrap; text-align: center;
+      background: var(--fog); border: 1px solid var(--rule); border-radius: 10px; padding: 0.25rem 0.6rem; line-height: 1.2; }
+    .stage-label b { display: block; font-family: var(--display); font-size: var(--s-21); font-weight: 600; letter-spacing: -0.01em; }
+    .stage-label span { font-size: var(--s-12); color: var(--muted); font-weight: 700; }
+    .stage-chip { position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%); background: var(--bad); color: #fff;
+      font-weight: 700; font-size: var(--s-14); letter-spacing: 0.06em; padding: 0.35rem 1rem; border-radius: 999px; }
+    .stage-help { position: absolute; right: 0.75rem; bottom: 0.6rem; font-size: var(--s-12); color: var(--muted); pointer-events: none; }
+    .stage-fallback { padding: 2rem; color: var(--ink-2); }
+    .view-switch { font-size: var(--s-14); color: var(--ink-2); }
+  </style>
+</head>
+<body class="model-page">
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <a class="wordmark" href="/" aria-label="All rooms">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 24h14a6 6 0 0 0 .8-11.95A8 8 0 0 0 8.4 13.3 5.5 5.5 0 0 0 9 24z"/></svg>
+      <span>Nimbus</span>
+    </a>
+    <span class="building">Virtual model room</span>
+    <span class="live" id="live" data-state="connecting"><span class="live-dot" aria-hidden="true"></span><span id="live-text">Connecting</span></span>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <a class="crumb" id="back" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span id="back-text">Room dashboard</span></a>
+    <div class="room-head">
+      <h1 class="room-title" id="title">Virtual model room</h1>
+      <span class="tags"><span class="tag tag-sim">Simulated fan and window</span><span class="tag tag-manual" id="manual-tag" hidden>Manual</span></span>
+    </div>
+    <p class="sim-note">The real fan and window servo aren't connected, so this page plays their part. It follows the same live decisions the Pi would receive, swings the window at servo speed and spins the fan at the commanded speed. If decisions stop for 10 seconds, it does what the real device does: closes the window and runs the fan at 50%. <a class="view-switch" id="view-2d" href="/model.html">Flat 2D view</a></p>
+
+    <p class="reason" id="reason">Loading…</p>
+
+    <figure class="scene">
+      <p class="sim-status" id="sim-status" data-state="waiting" role="status">Connecting to the server…</p>
+      <div class="stage" id="stage" role="img" aria-label="3D simulated model room">
+        <div class="stage-label" id="label-window" aria-hidden="true"><span>WINDOW</span><b id="window-cap">Closed</b></div>
+        <div class="stage-label" id="label-fan" aria-hidden="true"><span>EXHAUST FAN</span><b id="fan-cap">0%</b></div>
+        <div class="stage-chip" id="chip" hidden>FAIL-SAFE</div>
+        <div class="stage-help" aria-hidden="true">Drag to look around · scroll or pinch to zoom</div>
+      </div>
+    </figure>
+
+    <section class="readings" aria-label="Simulated room state">
+      <div class="reading"><span class="metric-label">People</span><span class="metric-value" data-f="people">–</span><span class="metric-sub" data-f="people-sub"></span></div>
+      <div class="reading"><span class="metric-label" data-f="aq-label">Gas level</span><span class="metric-value" data-f="aq">–</span><span class="metric-sub" data-f="aq-sub"></span></div>
+      <div class="reading"><span class="metric-label">Fan (simulated)</span><span class="metric-value" data-f="fan">–</span><span class="metric-sub" data-f="fan-sub"></span></div>
+      <div class="reading"><span class="metric-label">Window (simulated)</span><span class="metric-value" data-f="window">–</span><span class="metric-sub" data-f="window-sub"></span></div>
+      <div class="reading"><span class="metric-label">Control</span><span class="metric-value" data-f="mode">–</span><span class="metric-sub" data-f="mode-sub"></span></div>
+      <div class="reading"><span class="metric-label">Rain chance</span><span class="metric-value" data-f="rain">–</span><span class="metric-sub" data-f="rain-sub"></span></div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="importmap">{ "imports": { "three": "/vendor/three/three.module.js", "three/addons/": "/vendor/three/addons/" } }</script>
+  <script type="module" src="/model3d.js"></script>
+</body>
+</html>

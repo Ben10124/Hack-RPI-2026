@@ -1,6 +1,6 @@
-# Aerolite
+# Nimbus
 
-**Elevator pitch:** Aerolite counts people and senses stale air, then runs the fan and opens the window on its own, closing it before rain, and explains every decision live.
+**Elevator pitch:** Nimbus counts people and senses stale air, then runs the fan and opens the window on its own, closing it before rain, and explains every decision live.
 
 ## Inspiration
 
@@ -8,7 +8,7 @@ Classrooms and meeting rooms go from empty to packed in minutes, and the air goe
 
 ## What it does
 
-Aerolite watches how many people are in a room and how stale the air is getting, then sets the fan speed and opens or closes a window by itself.
+Nimbus watches how many people are in a room and how stale the air is getting, then sets the fan speed and opens or closes a window by itself.
 
 - **Follows people:** airflow scales with the headcount using the ASHRAE 62.1 classroom ventilation rate, and the fan works harder as the air gets worse.
 - **Reads the clouds:** it keeps the window shut when the forecast says rain or the barometric pressure is falling, and uses the fan instead.
@@ -50,7 +50,7 @@ Aerolite watches how many people are in a room and how stale the air is getting,
 - Reading the actual logs beats guessing, whether it's Docker on a dev board or a compiler error.
 - Being upfront about what a sensor measures makes the project stronger, not weaker.
 
-## What's next for Aerolite
+## What's next for Nimbus
 
 - Swap in a true CO₂ sensor (SCD40), and use the room air model to measure each room's real ventilation rate from how fast the air clears.
 - Drive real building hardware (window actuators, fresh-air dampers) through relays or BACnet.

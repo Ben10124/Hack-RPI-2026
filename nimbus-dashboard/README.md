@@ -1,4 +1,4 @@
-# Aerolite dashboard
+# Nimbus dashboard
 
 Live web dashboard and MongoDB data layer for occupancy-aware ventilation.
 It listens to the room devices over MQTT, decides the fan speed and window
@@ -89,7 +89,7 @@ SIMULATE=room2,room3
 ## MQTT messages
 
 All payloads are JSON. `room1` is the room id from `config/rooms.json`
-(add `MQTT_PREFIX=aerolite/` to make topics `aerolite/room1/...`).
+(add `MQTT_PREFIX=nimbus/` to make topics `nimbus/room1/...`).
 
 | Topic | Sent by | Example payload |
 |---|---|---|
